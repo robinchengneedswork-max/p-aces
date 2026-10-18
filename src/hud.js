@@ -294,7 +294,7 @@ function drawInputs(ctx, W, H, st) {
   ctx.textAlign = 'center';
   ctx.fillStyle = HUD.green;
   const label = (st.camera ? (s.scheme === 'stick' ? 'STICK' : 'FLAT HAND' + (s.pitchSrc === 'height' ? ' (height)' : '')) : 'KEYBOARD')
-    + ' · ' + (assistOn(s) ? 'ASSIST' : 'EXPERT');
+    + ' · ' + (assistOn(s) ? 'ASSIST' : 'RATE');
   ctx.fillText(label, x0 + size / 2 + 20, y0 - 16);
 }
 

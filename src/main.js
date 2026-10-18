@@ -42,7 +42,10 @@ function loadSettings() {
     }
     // v6: stick roll is the fist's slide again, tuned on recordings to 0.9 palm lengths.
     if ((saved.version || 1) < 6) s.stickThrow = CONFIG.DEFAULTS.stickThrow;
-    s.version = 6;
+    // v7: the stick is rate control (hold = keep rolling). The toggle used to sit on X, next to
+    // C, and an accidental press left the user's stick in assist, where it holds a bank angle.
+    if ((saved.version || 1) < 7) s.assist = { ...s.assist, stick: false };
+    s.version = 7;
   }
   return s;
 }
@@ -349,10 +352,10 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyR') { game = createGame(Date.now() % 100000); flash('RESET', HUD.ink); }
   if (e.code === 'Digit1' && settings.scheme !== 'flat') toggle('scheme', 'flat', 'stick', () => 'FLAT HAND');
   if (e.code === 'Digit2' && settings.scheme !== 'stick') toggle('scheme', 'flat', 'stick', () => 'FLIGHT STICK');
-  if (e.code === 'KeyX') {
+  if (e.code === 'KeyM') {
     settings.assist = { ...settings.assist, [settings.scheme]: !assistOn(settings) };
     saveSettings();
-    flash(assistOn(settings) ? 'ASSIST: hand angle = bank angle' : 'EXPERT: hold over = keep rolling', HUD.ink);
+    flash(assistOn(settings) ? 'ASSIST: hand angle = bank angle (holds the bank)' : 'RATE: stick = how fast it turns (hold = aileron roll)', HUD.ink);
   }
   if (e.code === 'KeyP') toggle('pitchSrc', 'tilt', 'height', v => 'PITCH FROM PALM ' + (v === 'tilt' ? 'TILT' : 'HEIGHT'));
   if (e.code === 'KeyL') toggle('headLook', true, false, v => (v ? 'HEAD LOOK ON' : 'HEAD LOOK OFF'));

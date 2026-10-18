@@ -115,4 +115,11 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     rest, ÷ yawRange 30°); C records its rest; `Y` toggles. Height/pinch/fist don't move it.
   - Analyzer: `side`, `fwd3d`, `fwdImg` stick-axis features, and signals ranked by separation
     discounted by **leak** into the other axis (separation alone ranked leaky height/aim first).
-- Next: user flies the ring-axis stick + left-hand rudder; re-record with G if anything's off.
+- **Round 7 (2026-10-18):** user: "pitch/roll should be how quickly things turn, not the
+  position — holding roll right does an aileron roll". Rate mode already did that; the user's
+  stick was in assist, almost certainly from an accidental X (it sat next to C). Toggle moved
+  to `M`, labelled RATE / ASSIST (not "Expert"), and settings v7 resets the stick to RATE.
+  **Wingtip vapour trails** (user request): `vaporAmount` = how fast the nose swings (pitch or
+  turn, not roll) → crossed ribbons from both tips with vertex-alpha fade; a full pull = full
+  vapour, a pure roll or gentle pull = none.
+- Next: user flies the ring-axis stick in RATE + left-hand rudder; re-record with G if off.

@@ -21,6 +21,10 @@ const CONFIG = {
   CEILING: 4000,
   CRASH_MARGIN: 4,
   RESPAWN_TIME: 2,
+  VAPOR_MIN_RATE: 0.35,      // wingtip vapour starts when the nose swings this fast (rad/s)…
+  VAPOR_FULL_RATE: 0.55,     // …and is full this much faster again (a full pull is 1.1 rad/s)
+  VAPOR_LIFE: 1.4,           // seconds a trail lingers
+  VAPOR_WIDTH: 0.35,         // half-width at the wingtip (m); widens as it drifts back
   START_ALT: 700,
 
   // Terrain
@@ -73,9 +77,10 @@ const CONFIG = {
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
-    version: 6,
+    version: 7,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
-    assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: rate (keep rolling)
+    assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: RATE — the stick
+                                          // sets how fast it rolls/pitches, hold it over = aileron roll
     pitchSrc: 'tilt',        // flat scheme: 'tilt' the palm, or raise/lower the 'height'
     invertPitch: false,
     rollRange: 35,           // degrees of hand tilt for full roll

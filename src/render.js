@@ -21,8 +21,9 @@ function createWorld(canvas, pixelRatio) {
 
   const w = { renderer, scene, camera, terrain: makeTerrain(), sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
     drones: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
+    trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
-  scene.add(w.terrain, w.sea, w.clouds.mesh, w.plane, w.ring, w.tracers, w.smoke.points);
+  scene.add(w.terrain, w.sea, w.clouds.mesh, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
   return w;
 }
 
@@ -265,6 +266,57 @@ function makeTracers() {
   return lines;
 }
 
+// Wingtip vapour: per tip, two crossed ribbons (one spanning the plane's up, one its wings), so
+// the trail reads from behind, from the side and from the cockpit. Vertex alpha fades with age.
+const TRAIL_MAX = 140;
+const WINGTIP = { out: 7.4, back: 5.8 };   // tip of the delta wing in the plane's frame
+
+function makeTrail() {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 4 * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL_MAX * 4 * 4), 4));
+  const idx = [];
+  for (let i = 0; i < TRAIL_MAX - 1; i++) {
+    const a = i * 4, b = a + 4;
+    idx.push(a, a + 1, b, a + 1, b + 1, b, a + 2, a + 3, b + 2, a + 3, b + 3, b + 2);
+  }
+  geo.setIndex(idx);
+  geo.setDrawRange(0, 0);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  mesh.frustumCulled = false;
+  return { mesh, pts: [] };
+}
+
+function updateTrails(w, p, dt) {
+  const k = p.crashed ? 0 : vaporAmount(w.prevFwd, p.fwd, dt);
+  w.prevFwd = { ...p.fwd };
+  w.vapor = k;
+  w.trails.forEach((T, i) => {
+    const side = i ? 1 : -1;
+    const tip = vAdd(vAdd(p.pos, vScale(p.right, side * WINGTIP.out)), vScale(p.fwd, -WINGTIP.back));
+    for (const s of T.pts) s.age += dt;
+    // Respawn teleports the plane: don't draw a ribbon across the map.
+    const last = T.pts[T.pts.length - 1];
+    if (last && vDist(last.p, tip) > 120) T.pts.length = 0;
+    T.pts.push({ p: tip, u: p.up, r: p.right, age: 0, k });
+    while (T.pts.length > TRAIL_MAX || (T.pts.length && T.pts[0].age > CONFIG.VAPOR_LIFE)) T.pts.shift();
+    const geo = T.mesh.geometry, pos = geo.attributes.position.array, col = geo.attributes.color.array;
+    T.pts.forEach((s, j) => {
+      const h = CONFIG.VAPOR_WIDTH * (1 + s.age * 3);
+      const a = s.k * (1 - s.age / CONFIG.VAPOR_LIFE) * 0.55;
+      const o = j * 12;
+      pos[o] = s.p.x + s.u.x * h; pos[o + 1] = s.p.y + s.u.y * h; pos[o + 2] = s.p.z + s.u.z * h;
+      pos[o + 3] = s.p.x - s.u.x * h; pos[o + 4] = s.p.y - s.u.y * h; pos[o + 5] = s.p.z - s.u.z * h;
+      pos[o + 6] = s.p.x + s.r.x * h; pos[o + 7] = s.p.y + s.r.y * h; pos[o + 8] = s.p.z + s.r.z * h;
+      pos[o + 9] = s.p.x - s.r.x * h; pos[o + 10] = s.p.y - s.r.y * h; pos[o + 11] = s.p.z - s.r.z * h;
+      for (let v = 0; v < 4; v++) col.set([1, 1, 1, a], j * 16 + v * 4);
+    });
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+    geo.setDrawRange(0, Math.max(0, T.pts.length - 1) * 12);
+  });
+}
+
 function makeSmoke() {
   const MAX = 1200;
   const geo = new THREE.BufferGeometry();
@@ -404,6 +456,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     return false;
   });
 
+  updateTrails(w, p, dt);
   updateCamera(w, p, dt, look);
   w.renderer.clear();
   w.renderer.render(w.scene, w.camera);

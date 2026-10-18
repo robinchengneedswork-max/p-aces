@@ -31,6 +31,14 @@ function rotatePlane(p, axis, a) {
   p.right = vRotate(p.right, axis, a);
 }
 
+// How hard the nose is being hauled round (pitch or turn, not roll: fwd doesn't move in a pure
+// roll), as 0..1 wingtip vapour. Real planes pull vapour off the tips under high g, i.e. hard pulls.
+function vaporAmount(prevFwd, fwd, dt) {
+  if (!prevFwd || dt <= 0) return 0;
+  const rate = Math.acos(clamp(vDot(prevFwd, fwd), -1, 1)) / dt;
+  return clamp((rate - CONFIG.VAPOR_MIN_RATE) / CONFIG.VAPOR_FULL_RATE, 0, 1);
+}
+
 function flightStep(p, ctrl, dt, assist) {
   if (p.crashed) return p;
   // Assist hands over to plain rate control while you're pulling through vertical or upside

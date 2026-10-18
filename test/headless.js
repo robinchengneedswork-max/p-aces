@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -434,6 +434,37 @@ function fly(ctrl, secs, assist, plane) {
   check('expert: roll right drops the right wing', ex.right.y < -0.5);
   const loop = fly({ pitch: 1 }, 2 * Math.PI / CONFIG.PITCH_RATE, false);
   check('expert: full pull loops back to level', Math.abs(loop.fwd.y) < 0.05 && loop.fwd.z < -0.99);
+  // The stick's default is RATE: holding it over keeps rolling (an aileron roll), it doesn't
+  // stop at a bank angle the way assist does.
+  {
+    const sd = settings();
+    check('stick defaults to rate control', sd.scheme === 'stick' && !X.assistOn(sd));
+    const q = X.createPlane(X.v3(0, 3000, 0));
+    let total = 0, prev = X.bankAngle(q);
+    for (let i = 0; i < 60 * 4; i++) {
+      X.flightStep(q, { roll: 0.4, pitch: 0, yaw: 0, throttle: 0.5 }, 1 / 60, X.assistOn(sd));
+      const b = X.bankAngle(q);
+      total += Math.atan2(Math.sin(b - prev), Math.cos(b - prev));
+      prev = b;
+    }
+    check('holding the stick 40% right: a continuous aileron roll (past inverted and still going after 4 s)', total > 1.5 * Math.PI, (total / DEG).toFixed(0) + '°');
+    const a = fly({ roll: 0.4 }, 4, true);
+    check('…whereas assist would hold a 30° bank', Math.abs(X.bankAngle(a) / DEG - 30) < 2);
+  }
+  // Wingtip vapour: hard pulls and tight turns, not rolls or straight flight.
+  {
+    const vap = (ctrl, assist, secs = 1) => {
+      const q = fly(ctrl, 1, assist);
+      const before = { ...q.fwd };
+      X.flightStep(q, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, ...ctrl }, 1 / 60, assist);
+      return X.vaporAmount(before, q.fwd, 1 / 60);
+    };
+    check('no vapour in straight flight', vap({}, false) === 0);
+    check('no vapour in a pure aileron roll', vap({ roll: 1 }, false) === 0);
+    check('full vapour on a full pull', vap({ pitch: 1 }, false) > 0.95);
+    check('some vapour in a hard banked assist turn', vap({ roll: 1 }, true) > 0.4, vap({ roll: 1 }, true).toFixed(2));
+    check('a gentle pull stays clean', vap({ pitch: 0.25 }, false) === 0);
+  }
   const tp = fly({ throttle: 1 }, 10, true);
   check('full throttle speeds up', tp.speed > 230, tp.speed.toFixed(0));
   let r = 1;

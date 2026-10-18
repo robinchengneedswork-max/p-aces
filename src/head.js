@@ -26,7 +26,9 @@ function createHead() {
   return {
     f: { yaw: createOneEuro(), pitch: createOneEuro() },
     m: null,                  // last measurement
-    look: { yaw: 0, pitch: 0 }, // radians the camera turns
+    target: { yaw: 0, pitch: 0 }, // where the head says to look (radians), updated per face reading
+    look: { yaw: 0, pitch: 0 },   // where the camera looks: chases target every frame (headFollow)
+    vel: { yaw: 0, pitch: 0 },
     seen: -1,
     lastT: 0,
   };
@@ -41,7 +43,7 @@ function headUpdate(h, kp, t, s) {
   const dt = Math.max(0, t - h.lastT);
   h.lastT = t;
   h.m = kp ? measureFace(kp) : null;
-  if (!s.headLook) { h.look.yaw = 0; h.look.pitch = 0; return h; }
+  if (!s.headLook) { h.target.yaw = 0; h.target.pitch = 0; return h; }
   // The nose tip sits well below the eye line, so pitch has no natural zero. Never calibrated:
   // average the first frames of face as "forward" (look stays put meanwhile).
   if (h.m && !s.headNeutral && (!h.auto || h.auto.n < CONFIG.HEAD_AUTO_FRAMES)) {
@@ -55,20 +57,29 @@ function headUpdate(h, kp, t, s) {
     const n = s.headNeutral || { yaw: h.auto.yaw / h.auto.n, pitch: h.auto.pitch / h.auto.n };
     const yaw = oneEuroStep(h.f.yaw, h.m.yaw - n.yaw, t, s.headSmooth, CONFIG.HEAD_BETA);
     const pitch = oneEuroStep(h.f.pitch, h.m.pitch - n.pitch, t, s.headSmooth, CONFIG.HEAD_BETA);
-    const ty = clamp(headAxis(yaw, s) * s.headGain, -CONFIG.LOOK_MAX_YAW, CONFIG.LOOK_MAX_YAW);
-    const tp = clamp(headAxis(pitch, s) * s.headGain * CONFIG.LOOK_PITCH_SCALE, -CONFIG.LOOK_MAX_PITCH, CONFIG.LOOK_MAX_PITCH);
-    // The gain amplifies every tremor, so the view glides toward where the head points
-    // instead of snapping to it.
-    const k = 1 - Math.exp(-CONFIG.LOOK_EASE * dt);
-    h.look.yaw += (ty - h.look.yaw) * k;
-    h.look.pitch += (tp - h.look.pitch) * k;
+    h.target.yaw = clamp(headAxis(yaw, s) * s.headGain, -CONFIG.LOOK_MAX_YAW, CONFIG.LOOK_MAX_YAW);
+    h.target.pitch = clamp(headAxis(pitch, s) * s.headGain * CONFIG.LOOK_PITCH_SCALE, -CONFIG.LOOK_MAX_PITCH, CONFIG.LOOK_MAX_PITCH);
     h.seen = t;
   } else if (t - h.seen > CONFIG.HAND_LOST_HOLD) {
     // Face gone (turned too far, or left the frame): ease the view back to forward.
     const k = Math.exp(-CONFIG.HAND_LOST_DECAY * dt);
-    h.look.yaw *= k;
-    h.look.pitch *= k;
+    h.target.yaw *= k;
+    h.target.pitch *= k;
     h.f = { yaw: createOneEuro(), pitch: createOneEuro() };
+  }
+  return h;
+}
+
+// Every frame: the view chases the target on a critically damped spring — it accelerates toward
+// where the head points and decelerates into it, no overshoot. Face readings arrive ~10x/s; easing
+// only when a reading came in made the view jump at that rate (the stutter the user saw).
+function headFollow(h, dt, s) {
+  const w = s.headSpring, steps = Math.max(1, Math.ceil(dt / 0.01)), d = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    for (const k of ['yaw', 'pitch']) {
+      h.vel[k] += (w * w * (h.target[k] - h.look[k]) - 2 * w * h.vel[k]) * d;
+      h.look[k] += h.vel[k] * d;
+    }
   }
   return h;
 }

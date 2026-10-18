@@ -84,7 +84,6 @@ const CONFIG = {
   LOOK_PITCH_SCALE: 0.7,     // nodding is noisier than turning; amplify it less
   HEAD_AUTO_FRAMES: 15,      // uncalibrated: first ~0.5 s of face = "forward"
   HEAD_BETA: 0.15,           // One Euro speed term for the head (lower = calmer)
-  LOOK_EASE: 5,              // view glides toward the head target at this rate (1/s)
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
@@ -115,6 +114,7 @@ const CONFIG = {
     headGain: 11,            // radians of view per unit of nose offset (face widths)
     headDeadzone: 0.045,
     headSmooth: 0.35,        // One Euro min cutoff for the head
+    headSpring: 9,           // how stiffly the view chases the head (rad/s): settles in ~4/headSpring s
     headNeutral: null,       // { yaw, pitch } from calibration      // stick scheme: twisting the fist = rudder (leaks into rolls)
     neutral: null,           // { flat: {...}, stick: {...} } from calibration
   },
@@ -134,6 +134,7 @@ const CONFIG = {
     { key: 'headGain', label: 'Head look gain', min: 1, max: 15, step: 0.5 },
     { key: 'headDeadzone', label: 'Head deadzone', min: 0, max: 0.1, step: 0.005 },
     { key: 'headSmooth', label: 'Head smooth (min cutoff)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'headSpring', label: 'Head look glide (higher = snappier)', min: 3, max: 20, step: 0.5 },
   ],
   STORAGE_KEY: 'sky-ace-settings',
 };

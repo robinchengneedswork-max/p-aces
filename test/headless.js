@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -347,7 +347,10 @@ function face(yawDeg = 0, pitchDeg = 0, o = {}) {
   });
 }
 function look(kpFn, n, s, h = X.createHead(), t0 = 0) {
-  for (let i = 0; i < n; i++) X.headUpdate(h, typeof kpFn === 'function' ? kpFn(i) : kpFn, t0 + i / 30, s);
+  for (let i = 0; i < n; i++) {
+    X.headUpdate(h, typeof kpFn === 'function' ? kpFn(i) : kpFn, t0 + i / 30, s);
+    X.headFollow(h, 1 / 30, s);
+  }
   return h;
 }
 {
@@ -369,12 +372,33 @@ function look(kpFn, n, s, h = X.createHead(), t0 = 0) {
   check('a 1.5° fidget stays in the deadzone', look(i => face(1.5 * Math.sin(i / 3)), 60, s).look.yaw === 0);
   check('big turns cap at the max look angle', look(face(60), 30, s).look.yaw <= CONFIG.LOOK_MAX_YAW + 1e-9);
   const h = look(face(20), 30, s);
-  for (let i = 0; i < 60; i++) X.headUpdate(h, null, 1 + i / 30, s);
+  for (let i = 0; i < 60; i++) { X.headUpdate(h, null, 1 + i / 30, s); X.headFollow(h, 1 / 30, s); }
   check('face lost → view eases back to forward', Math.abs(h.look.yaw) < 3 * DEG, (h.look.yaw / DEG).toFixed(1) + '°');
   check('head look off → always forward', look(face(20), 30, { ...s, headLook: false }).look.yaw === 0);
   const sc = settings();
   check('calibrate takes the current head pose as forward', X.calibrateHead(sc, face(8, -5)) && look(face(8, -5), 30, sc).look.yaw === 0);
   check('calibrating with no face fails', !X.calibrateHead(settings(), null));
+  // Face readings arrive ~10x/s, frames at 60: the view must glide between readings, accelerating
+  // and decelerating, never jumping when a reading lands.
+  {
+    const sg = settings({ headNeutral: X.measureFace(face()) });
+    const hh = X.createHead();
+    const seq = [];
+    for (let i = 0; i < 120; i++) {
+      const tt = i / 60;
+      if (i % 6 === 0) X.headUpdate(hh, face(i < 12 ? 0 : 15), tt, sg);
+      X.headFollow(hh, 1 / 60, sg);
+      seq.push(hh.look.yaw);
+    }
+    const steps = seq.slice(1).map((v, i) => v - seq[i]);
+    const start = steps.findIndex(d => Math.abs(d) > 1e-6);
+    const moving = steps.slice(start, start + 48).filter(d => Math.abs(d) > 1e-6).length;
+    const jerk = Math.max(...steps.slice(1).map((d, i) => Math.abs(d - steps[i])));
+    check('view moves every frame between 10 Hz face readings (no stop-start)', start > 0 && moving === 48, moving + '/48 frames moving');
+    check('…with no sudden kicks (speed changes smoothly)', jerk < 0.01, 'max frame-to-frame speed change ' + (jerk / DEG).toFixed(2) + '°');
+    check('…and settles on the target without overshooting', Math.abs(seq[119] - hh.target.yaw) < 0.03 * Math.abs(hh.target.yaw) && Math.max(...seq) <= hh.target.yaw * 1.001,
+      (seq[119] / DEG).toFixed(1) + '° vs ' + (hh.target.yaw / DEG).toFixed(1) + '°');
+  }
 }
 
 console.log('gesture recorder');

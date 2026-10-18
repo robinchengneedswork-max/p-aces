@@ -185,6 +185,7 @@ function frame(ts) {
     }
   }
   if (camera) controlsUpdate(controls, hands, now, settings);
+  if (camera) headFollow(head, dt, settings);
   if (recorder) {
     recorderStep(recorder, now);
     if (fresh) recorderAdd(recorder, now, hands, settings, controls);

@@ -3,6 +3,10 @@
 Ace Combat-style arcade flying controlled by **webcam hand tracking** (MediaPipe Hand Landmarker).
 A control test bed first: it exists to find out whether flying with your hands feels good.
 
+Repo: github.com/robinchengneedswork-max/p-aces — this folder is its own git repo. Push **working**
+builds (tests green) to `main`; it's a static Vercel site (`vercel.json`, `.vercelignore` keeps
+test/tools/serve.js off it). On Vercel the recorder downloads instead of saving to `recordings/`.
+
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
 keyboard flying. Tests: `node test/headless.js` (57 checks, synthetic hands, no camera).

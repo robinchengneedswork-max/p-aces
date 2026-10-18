@@ -154,4 +154,12 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     a 24 fps cadence (events queued between pictures so explosions aren't skipped; measured 60 fps
     sim / 24.0 drawn); lit materials swap to MeshToonMaterial (3-band gradient), inverted-hull ink on
     plane/drones/ring/clouds (instanced ink twin), random-per-picture speed lines in the HUD.
-- Next: user flies with the worker; tries T.
+- **Round 11 (2026-10-18):** user: with the worker the game was smoother but hand tracking
+  "drastically worse"; toon (24 fps) made everything smoother. Cause: drawing and the GPU hand
+  model share the laptop's GPU. Measured (fake camera, real GPU, 25 s each): GPU tracking
+  detect 40.6 ms at 60 fps drawn vs 29-33 ms at 24-30; CPU tracking only 14-15 Hz (vs 22-26 GPU).
+  → normal look now draws at most `maxFps` 30 (slider), GPU tracking kept; perf line shows
+  "drawn N" and the delegate. Real hands add the landmark stage, so contention is worse than
+  the fake-camera numbers.
+- Next: user flies at the 30 cap; if tracking still suffers, consider adaptive cap (lower the
+  draw rate when tracking Hz drops).

@@ -28,7 +28,10 @@ const Tracker = {
   busy: false,               // worker mode: a frame is out being detected
   result: null,              // worker mode: newest result not yet handed to the game
 
-  async init(video) {
+  // delegate: 'GPU' (falls back to CPU) or 'CPU'. GPU wins on the user's laptop even while sharing
+  // with the game's drawing (22-26 Hz vs 14-15 Hz on CPU), so GPU is the default.
+  async init(video, delegate) {
+    this.delegates = delegate === 'CPU' ? ['CPU'] : ['GPU', 'CPU'];
     this.video = video;
     video.srcObject = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' },
@@ -67,7 +70,7 @@ const Tracker = {
           reject(new Error(m.message));
         }
       };
-      w.postMessage({ type: 'init' });
+      w.postMessage({ type: 'init', delegates: this.delegates });
     });
   },
 
@@ -84,7 +87,7 @@ const Tracker = {
 
   async startMain() {
     const fileset = await FilesetResolver.forVisionTasks('vendor/mediapipe/wasm');
-    for (const delegate of ['GPU', 'CPU']) {
+    for (const delegate of this.delegates) {
       try {
         this.landmarker = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: 'vendor/mediapipe/hand_landmarker.task', delegate },

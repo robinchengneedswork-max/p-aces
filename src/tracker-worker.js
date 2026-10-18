@@ -8,9 +8,9 @@ import { FilesetResolver, HandLandmarker, FaceDetector } from '../vendor/mediapi
 const VENDOR = new URL('../vendor/mediapipe/', import.meta.url);
 let hands = null, face = null, delegate = '', faceTick = 0, lastFace = null;
 
-async function init() {
+async function init(delegates) {
   const fileset = await FilesetResolver.forVisionTasks(new URL('wasm', VENDOR).href, true);
-  for (const d of ['GPU', 'CPU']) {
+  for (const d of delegates) {
     try {
       hands = await HandLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: new URL('hand_landmarker.task', VENDOR).href, delegate: d },
@@ -67,7 +67,7 @@ self.onmessage = async e => {
   const m = e.data;
   if (m.type === 'init') {
     try {
-      await init();
+      await init(m.delegates || ['GPU', 'CPU']);
       self.postMessage({ type: 'ready', delegate });
     } catch (err) {
       self.postMessage({ type: 'error', message: String(err && err.message || err) });

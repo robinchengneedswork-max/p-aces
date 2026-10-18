@@ -107,6 +107,9 @@ const CONFIG = {
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
     beta: 0.6,
     renderScale: 1,          // pixels per CSS pixel; lower = faster on a laptop GPU
+    maxFps: 30,              // normal look: draw at most this often. Drawing shares the GPU with hand
+                             // tracking: at 60 each detection took 25-40% longer (measured on the user's
+                             // laptop), and with real hands in view tracking got much worse.
     anime: false,            // T: anime look (24 fps cadence, cel shading, ink, speed lines)
     headLook: true,          // turn your head to look around (face tracking)
     headGain: 11,            // radians of view per unit of nose offset (face widths)
@@ -127,6 +130,7 @@ const CONFIG = {
     { key: 'minCutoff', label: 'Smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },
     { key: 'beta', label: 'Responsiveness (beta)', min: 0, max: 5, step: 0.1 },
     { key: 'renderScale', label: 'Render scale', min: 0.5, max: 2, step: 0.25 },
+    { key: 'maxFps', label: 'Max draw fps (normal look)', min: 20, max: 60, step: 5 },
     { key: 'headGain', label: 'Head look gain', min: 1, max: 15, step: 0.5 },
     { key: 'headDeadzone', label: 'Head deadzone', min: 0, max: 0.1, step: 0.005 },
     { key: 'headSmooth', label: 'Head smooth (min cutoff)', min: 0.1, max: 3, step: 0.1 },

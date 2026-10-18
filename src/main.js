@@ -240,9 +240,12 @@ function frame(ts) {
   // The anime look draws on a fixed 24 fps cadence; the game, input and sound above run every frame.
   sinceDraw += dt;
   drawAcc += dt;
-  const step = 1 / CONFIG.ANIME_FPS;
-  const draw = !settings.anime || drawAcc >= step;
-  if (settings.anime) { if (draw) drawAcc = drawAcc - step > step ? 0 : drawAcc - step; } else drawAcc = 0;
+  // Any cap below 60 uses the same cadence: fewer pictures leave the GPU to the hand tracking.
+  const cap = settings.anime ? CONFIG.ANIME_FPS : settings.maxFps;
+  const step = 1 / cap;
+  const capped = cap < 60;
+  const draw = !capped || drawAcc >= step;
+  if (capped) { if (draw) drawAcc = drawAcc - step > step ? 0 : drawAcc - step; } else drawAcc = 0;
   if (draw) {
     const view = Object.create(game);
     view.events = pendingEvents;
@@ -289,8 +292,8 @@ function perfSample(ts, workMs) {
 }
 
 function perfLine(camera) {
-  let s = Math.round(perf.fps) + ' fps' + (settings.anime ? ' (drawn ' + Math.round(perf.drawFps) + ')' : '') + ' · ' + perf.workMs.toFixed(1) + ' ms js';
-  if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz, ' + Tracker.detectMs.toFixed(1) + ' ms'
+  let s = Math.round(perf.fps) + ' fps (drawn ' + Math.round(perf.drawFps) + ') · ' + perf.workMs.toFixed(1) + ' ms js';
+  if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz on ' + Tracker.delegate + ', ' + Tracker.detectMs.toFixed(1) + ' ms'
     + (Tracker.mode === 'worker' ? ' (background)' : ' (BLOCKING)')
     + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · no face model');
   return s + ' · x' + settings.renderScale;

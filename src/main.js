@@ -46,7 +46,9 @@ function loadSettings() {
     // v7: the stick is rate control (hold = keep rolling). The toggle used to sit on X, next to
     // C, and an accidental press left the user's stick in assist, where it holds a bank angle.
     if ((saved.version || 1) < 7) s.assist = { ...s.assist, stick: false };
-    s.version = 7;
+    // v8: pitch is more sensitive by default; saves still on the old 30° move to the new one.
+    if ((saved.version || 1) < 8 && s.stickPitch >= 30) s.stickPitch = CONFIG.DEFAULTS.stickPitch;
+    s.version = 8;
   }
   return s;
 }

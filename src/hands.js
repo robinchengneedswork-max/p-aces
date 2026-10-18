@@ -210,8 +210,9 @@ function controlsUpdate(c, hands, t, s) {
     c.f = { roll: createOneEuro(), pitch: createOneEuro(), yaw: c.f.yaw };
   }
 
-  c.out.roll = shapeAxis(c.raw.roll, s);
-  c.out.pitch = shapeAxis(c.raw.pitch, s);
+  const ease = 1 - Math.exp(-CONFIG.INPUT_EASE * dt);
+  c.out.roll += (shapeAxis(c.raw.roll, s) - c.out.roll) * ease;
+  c.out.pitch += (shapeAxis(c.raw.pitch, s) - c.out.pitch) * ease;
 
   if (c.thrM && s.thrRudder) {
     const nr = (s.neutral && s.neutral.thr) ? s.neutral.thr.roll : 0;
@@ -222,7 +223,7 @@ function controlsUpdate(c, hands, t, s) {
     c.f.yaw = createOneEuro();
   }
   // The rudder hand also throttles and fires, so it wobbles: it gets its own, wider deadzone.
-  c.out.yaw = shapeAxis(c.raw.yaw, { ...s, deadzone: s.yawDeadzone });
+  c.out.yaw += (shapeAxis(c.raw.yaw, { ...s, deadzone: s.yawDeadzone }) - c.out.yaw) * ease;
 
   if (c.thrM) {
     const m = c.thrM;

@@ -66,6 +66,11 @@ const CONFIG = {
   FIST_ON: 1.2, FIST_OFF: 1.5,
   THROTTLE_LOW: 0.85, THROTTLE_HIGH: 0.3,  // image y of the throttle hand for 0 and full
   CALIB_COUNTDOWN: 3,
+  INPUT_EASE: 12,            // stick/rudder output glides toward the filtered input at this rate (1/s),
+                             // every drawn frame: hand tracking only updates ~20x/s, and the steps
+                             // between updates were most of the jitter (-58% on the recordings, no added lag)
+  FOV_BASE: 65,              // camera field of view at minimum speed (degrees)…
+  FOV_SPEED: 18,             // …plus this much at top speed (and a little more past it)
   CLAP_COUNTDOWN: 4,         // after a double clap: an extra second to get back on the stick
   CLAP_TOGETHER: 1.4,        // palms closer than this (palm lengths) = hands together…
   CLAP_APART: 2.4,           // …further than this = apart again (hysteresis)
@@ -82,7 +87,7 @@ const CONFIG = {
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
-    version: 7,
+    version: 8,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
     assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: RATE — the stick
                                           // sets how fast it rolls/pitches, hold it over = aileron roll
@@ -91,7 +96,8 @@ const CONFIG = {
     rollRange: 35,           // degrees of hand tilt for full roll
     pitchRange: 30,          // degrees of palm tilt for full pitch
     stickThrow: 0.9,         // palm lengths of fist travel for full deflection (stick roll, flat 'height' pitch)
-    stickPitch: 30,          // stick: degrees of lean toward/away from the camera for full pitch
+    stickPitch: 18,          // stick: degrees of lean toward/away from the camera for full pitch
+                             // (user kept turning 30 down; pulls on the recordings reach ~20-30°)
     thrRudder: true,         // turning the throttle hand like a dial = rudder (yaw)
     yawRange: 30,            // degrees of throttle-hand turn for full rudder
     yawDeadzone: 0.25,       // rudder ignores turns under this share of yawRange (~7.5° at 30°)

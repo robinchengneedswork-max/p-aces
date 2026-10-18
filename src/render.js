@@ -492,6 +492,13 @@ function renderWorld(w, g, dt, now, look, ctrl) {
 
 function updateCamera(w, p, dt, look) {
   const cam = w.camera;
+  // Field of view widens with speed, the usual game trick for a sense of speed.
+  const k = clamp((p.speed - CONFIG.SPEED_MIN) / (CONFIG.SPEED_MAX - CONFIG.SPEED_MIN), 0, 1.25);
+  const fov = CONFIG.FOV_BASE + CONFIG.FOV_SPEED * k;
+  if (Math.abs(cam.fov - fov) > 0.01) {
+    cam.fov += (fov - cam.fov) * (1 - Math.exp(-dt * 3));
+    cam.updateProjectionMatrix();
+  }
   if (p.crashed) { cam.lookAt(tv(p.pos)); return; }
   const pos = tv(p.pos), up = tv(p.up);
   // Head look turns the view about the plane's own axes: yaw about its up, pitch about its wings.

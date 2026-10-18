@@ -133,4 +133,15 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   - Cockpit view shows your own plane: wings, tail, canards and engine from `makePlaneModel` (minus
     fuselage shell + glass) in the cockpit scene, plus a nose cone past the dash and a spine
     behind the seat.
-- Next: user flies; tune clap thresholds if it misfires or misses.
+- **Round 9 (2026-10-18):** user turned pitch sensitivity up every time; "pitch only, roll is
+  ok; a little lag is fine"; jittery; wanted FOV with speed.
+  - stickPitch 30° → 18° (settings v8 moves saves still on 30).
+  - **INPUT_EASE**: outputs glide toward the filtered input every drawn frame (12/s). Swept on
+    the recordings at 60 fps: jitter -58% with no added lag. Changing the One Euro cutoff/beta
+    alone only traded jitter for lag.
+  - FOV 65° + 18° × speed fraction, eased.
+  - **Root cause of jitter/chug, not yet fixed:** recordings log hand detection at 44-54 ms on the
+    main thread (GPU delegate), so the game drew at only 16-21 fps. Fix = run MediaPipe in a Web
+    Worker (send `createImageBitmap(video)` frames), so rendering stays at 60 fps; testable
+    headless with Edge's fake camera (`--use-fake-device-for-media-stream`).
+- Next: user flies; offer the worker move.

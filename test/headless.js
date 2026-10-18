@@ -107,7 +107,7 @@ console.log('flat-hand scheme');
   check('tilt right 25° → roll right', cr.out.roll > 0.3, cr.out.roll.toFixed(2));
   const cl = drive([hand({ roll: -25 })], 30, s);
   check('tilt left 25° → roll left, same size', near(cl.out.roll, -cr.out.roll, 1e-6));
-  check('tilt 40° (past the range) → full roll', drive([hand({ roll: 40 })], 30, s).out.roll === 1);
+  check('tilt 40° (past the range) → full roll', drive([hand({ roll: 40 })], 30, s).out.roll > 0.99);
   const cu = drive([hand({ pitch: -45 })], 30, s);
   check('fingers tipped up 25° → nose up', cu.out.pitch > 0.4, cu.out.pitch.toFixed(2));
   check('fingers tipped down → nose down', drive([hand({ pitch: -95 })], 30, s).out.pitch < -0.4);
@@ -255,7 +255,7 @@ console.log('left-hand rudder');
   check('Y off → no rudder from the hand', drive([left({ roll: 20 }), stick], 30, { ...s, thrRudder: false }).out.yaw === 0);
   const gone = drive([left({ roll: 20 }), stick], 30, s);
   for (let i = 0; i < 30; i++) X.controlsUpdate(gone, [stick], 1 + i / 30, s);
-  check('left hand leaves view → rudder returns to centre', gone.out.yaw === 0);
+  check('left hand leaves view → rudder returns to centre', Math.abs(gone.out.yaw) < 0.01);
 }
 
 console.log('double clap');
@@ -292,6 +292,22 @@ console.log('double clap');
   let f2 = 0;
   for (let i = 0; i < 120; i++) if (X.clapUpdate(lone, i % 20 < 10 ? [hand({ cx: 0.7 })] : [], i / 30)) f2++;
   check('one hand flickering in and out of view never triggers it', f2 === 0);
+}
+
+console.log('smoothing');
+{
+  // Hand tracking updates ~20x/s; the game draws at 60. Between camera frames the output should
+  // glide, not jump. Feed a step at 20 Hz and sample at 60 Hz.
+  const s = settings({ scheme: 'flat' });
+  X.calibrateNeutral(s, [hand()]);
+  const c = X.createControls();
+  for (let i = 0; i < 60; i++) X.controlsUpdate(c, [hand()], i / 60, s);
+  const seq = [];
+  for (let i = 0; i < 30; i++) { X.controlsUpdate(c, [hand({ roll: 30 })], 1 + i / 60, s); seq.push(c.out.roll); }
+  const jumps = seq.slice(1).map((v, i) => v - seq[i]);
+  check('a sudden full input ramps in over several drawn frames, not one jump', Math.max(...jumps) < 0.35 && seq[seq.length - 1] > 0.6,
+    'biggest jump ' + Math.max(...jumps).toFixed(2) + ', after 0.5 s ' + seq[seq.length - 1].toFixed(2));
+  check('pitch default is more sensitive than before (18° of stick lean = full)', CONFIG.DEFAULTS.stickPitch === 18);
 }
 
 console.log('hand lost');

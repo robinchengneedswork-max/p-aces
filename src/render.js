@@ -125,6 +125,7 @@ function makePlaneModel() {
   const fus = new THREE.Mesh(new THREE.ConeGeometry(1.3, 15, 6), body);
   fus.geometry.rotateX(-Math.PI / 2);
   g.add(fus);
+  g.userData.fus = fus;
   const wingShape = new THREE.Shape();
   wingShape.moveTo(0, -3); wingShape.lineTo(7.5, 4.5); wingShape.lineTo(-7.5, 4.5); wingShape.lineTo(0, -3);
   const wing = new THREE.Mesh(new THREE.ExtrudeGeometry(wingShape, { depth: 0.35, bevelEnabled: false }), body);
@@ -141,6 +142,7 @@ function makePlaneModel() {
   glass.scale.set(0.8, 0.7, 2);
   glass.position.set(0, 0.9, -3);
   g.add(glass);
+  g.userData.glass = glass;
   const flame = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.85 }));
   flame.geometry.rotateX(Math.PI / 2);
   flame.position.set(0, 0, 8.5);
@@ -238,7 +240,22 @@ function makeCockpit() {
   throttle.add(lever, knob);
   scene.add(throttle);
 
-  return { scene, camera, sun, needles, stick, throttle };
+  // The outside of your own plane: wings, tail, canards and engine from the real model, minus
+  // the fuselage shell (it would fill the seat) and canopy glass. A nose cone ahead of the dash and
+  // a spine behind the seat stand in for the fuselage.
+  const ext = makePlaneModel();
+  ext.remove(ext.userData.fus, ext.userData.glass);
+  const skin = new THREE.MeshPhongMaterial({ color: 0x9aa7b4, flatShading: true });
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.62, 6.4, 8), skin);
+  nose.geometry.rotateX(-Math.PI / 2);
+  nose.position.set(0, 0.35, -4.3);
+  const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 1.15, 5.6, 8), skin);
+  spine.geometry.rotateX(Math.PI / 2);
+  spine.position.set(0, 0.35, 4.7);
+  ext.add(nose, spine);
+  scene.add(ext);
+
+  return { scene, camera, sun, needles, stick, throttle, ext };
 }
 
 function makeDroneModel() {
@@ -381,8 +398,9 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     // The sun, seen from inside the plane.
     C.sun.position.set(0.5, 1, 0.3).applyQuaternion(w.plane.quaternion.clone().invert());
   }
-  const flame = w.plane.userData.flame;
-  flame.scale.set(1, 1, 0.4 + p.throttle * 1.2 + Math.random() * 0.15);
+  const flameLen = 0.4 + p.throttle * 1.2 + Math.random() * 0.15;
+  w.plane.userData.flame.scale.set(1, 1, flameLen);
+  w.cockpit.ext.userData.flame.scale.set(1, 1, flameLen);
 
   // Drones: create/remove meshes to match the game list.
   const alive = new Set();

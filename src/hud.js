@@ -64,7 +64,7 @@ function drawHud(ctx, W, H, st) {
   if (st.recorder) drawRecorder(ctx, W, H, st);
   else if (p.crashed) bigText(ctx, W, H, 'CRASHED', HUD.red, 'respawning…');
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
-    st.settings.scheme === 'stick' ? 'Hold your fist where the stick is centred, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"');
+    (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
   else if (st.warn) {
     ctx.fillStyle = HUD.amber;
     ctx.font = 'bold 18px ' + HUD.font;
@@ -76,7 +76,7 @@ function drawHud(ctx, W, H, st) {
     ctx.textAlign = 'left';
     ctx.font = '12px ' + HUD.font;
     ctx.fillStyle = HUD.dim;
-    ctx.fillText('V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
+    ctx.fillText('V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
   }
 }
 

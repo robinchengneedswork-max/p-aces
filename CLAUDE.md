@@ -122,4 +122,15 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   **Wingtip vapour trails** (user request): `vaporAmount` = how fast the nose swings (pitch or
   turn, not roll) → crossed ribbons from both tips with vertex-alpha fade; a full pull = full
   vapour, a pure roll or gentle pull = none.
-- Next: user flies the ring-axis stick in RATE + left-hand rudder; re-record with G if off.
+- **Round 8 (2026-10-18):** user: "much better!"
+  - Rudder has its own deadzone (`yawDeadzone` 0.25 ≈ 7.5° of left-hand turn): that hand also
+    throttles and fires, so it wobbles.
+  - **Double clap = calibrate** (`clapUpdate`): palm gap in palm lengths, < 1.4 together /
+    > 2.4 apart; two hands that were < 3.5 apart becoming one detection also counts (palms merge at
+    contact). Two claps within 1.2 s → 4 s countdown. Tests: normal two-handed flying and a
+    flickering lone hand never trigger it.
+  - The sim now pauses during any calibration countdown (rate stick + hands off it = spinning).
+  - Cockpit view shows your own plane: wings, tail, canards and engine from `makePlaneModel` (minus
+    fuselage shell + glass) in the cockpit scene, plus a nose cone past the dash and a spine
+    behind the seat.
+- Next: user flies; tune clap thresholds if it misfires or misses.

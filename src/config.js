@@ -66,6 +66,11 @@ const CONFIG = {
   FIST_ON: 1.2, FIST_OFF: 1.5,
   THROTTLE_LOW: 0.85, THROTTLE_HIGH: 0.3,  // image y of the throttle hand for 0 and full
   CALIB_COUNTDOWN: 3,
+  CLAP_COUNTDOWN: 4,         // after a double clap: an extra second to get back on the stick
+  CLAP_TOGETHER: 1.4,        // palms closer than this (palm lengths) = hands together…
+  CLAP_APART: 2.4,           // …further than this = apart again (hysteresis)
+  CLAP_WINDOW: 1.2,          // two claps within this many seconds = calibrate
+  CLAP_MERGE: 3.5,           // two hands this close that become one = they met (the tracker merged them)
 
   // Head look
   LOOK_MAX_YAW: 160 * DEG,
@@ -89,6 +94,7 @@ const CONFIG = {
     stickPitch: 30,          // stick: degrees of lean toward/away from the camera for full pitch
     thrRudder: true,         // turning the throttle hand like a dial = rudder (yaw)
     yawRange: 30,            // degrees of throttle-hand turn for full rudder
+    yawDeadzone: 0.25,       // rudder ignores turns under this share of yawRange (~7.5° at 30°)
     deadzone: 0.12,
     expo: 1.4,
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
@@ -107,6 +113,7 @@ const CONFIG = {
     { key: 'stickThrow', label: 'Stick: slide for full roll (palms)', min: 0.3, max: 3, step: 0.05 },
     { key: 'stickPitch', label: 'Stick: lean for full pitch (°)', min: 8, max: 60, step: 1 },
     { key: 'yawRange', label: 'Rudder: left-hand turn for full (°)', min: 10, max: 60, step: 1 },
+    { key: 'yawDeadzone', label: 'Rudder deadzone', min: 0, max: 0.6, step: 0.01 },
     { key: 'deadzone', label: 'Deadzone', min: 0, max: 0.4, step: 0.01 },
     { key: 'expo', label: 'Expo (1 = linear)', min: 1, max: 3, step: 0.05 },
     { key: 'minCutoff', label: 'Smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },

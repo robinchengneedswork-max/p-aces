@@ -221,7 +221,8 @@ function controlsUpdate(c, hands, t, s) {
     c.raw.yaw *= Math.exp(-CONFIG.HAND_LOST_DECAY * 2 * dt);
     c.f.yaw = createOneEuro();
   }
-  c.out.yaw = shapeAxis(c.raw.yaw, s);
+  // The rudder hand also throttles and fires, so it wobbles: it gets its own, wider deadzone.
+  c.out.yaw = shapeAxis(c.raw.yaw, { ...s, deadzone: s.yawDeadzone });
 
   if (c.thrM) {
     const m = c.thrM;
@@ -249,6 +250,37 @@ function neutralRoom(n) {
     return 'Your flying hand is near the edge of the camera — move it (or the camera) toward the middle for room to roll';
   }
   return '';
+}
+
+// Double clap → calibrate. Watches the gap between the two palms (in palm lengths): each
+// apart → together transition is a clap, and two within CLAP_WINDOW fire. Palms touching often
+// merge into one detection, so two close hands suddenly becoming one also counts as together.
+function createClap() {
+  return { together: false, lastGap: Infinity, lastSeen2: -1, claps: [] };
+}
+
+// Returns true on the frame the second clap lands.
+function clapUpdate(cl, hands, t) {
+  let together = cl.together;
+  if (hands.length === 2) {
+    const a = measureHand(hands[0]), b = measureHand(hands[1]);
+    const gap = Math.hypot(a.cx - b.cx, a.cy - b.cy) / ((a.scale + b.scale) / 2 || 1);
+    if (gap < CONFIG.CLAP_TOGETHER) together = true;
+    else if (gap > CONFIG.CLAP_APART) together = false;
+    cl.lastGap = gap;
+    cl.lastSeen2 = t;
+  } else if (hands.length === 1 && t - cl.lastSeen2 < 0.2 && cl.lastGap < CONFIG.CLAP_MERGE) {
+    together = true;
+  } else if (hands.length === 0) {
+    together = false;
+  }
+  const clapped = together && !cl.together;
+  cl.together = together;
+  if (!clapped) return false;
+  cl.claps = cl.claps.filter(c => t - c <= CONFIG.CLAP_WINDOW);
+  cl.claps.push(t);
+  if (cl.claps.length >= 2) { cl.claps = []; return true; }
+  return false;
 }
 
 function calibrateNeutral(s, hands) {

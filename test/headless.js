@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -250,10 +250,48 @@ console.log('left-hand rudder');
   check('pinching (guns) does not steer', drive([left({ pinch: true }), stick], 30, s).out.yaw === 0);
   check('fist (missile) does not steer', drive([left({ fist: true }), stick], 30, s).out.yaw === 0);
   check('rudder does not touch roll or pitch', right.out.roll === 0 && right.out.pitch === 0);
+  check('a 5° wobble of the left hand stays inside the rudder deadzone', drive([left({ roll: 5 }), stick], 30, s).out.yaw === 0);
+  check('rudder deadzone is its own setting (0 = every degree counts)', drive([left({ roll: 5 }), stick], 30, { ...s, yawDeadzone: 0 }).out.yaw > 0);
   check('Y off → no rudder from the hand', drive([left({ roll: 20 }), stick], 30, { ...s, thrRudder: false }).out.yaw === 0);
   const gone = drive([left({ roll: 20 }), stick], 30, s);
   for (let i = 0; i < 30; i++) X.controlsUpdate(gone, [stick], 1 + i / 30, s);
   check('left hand leaves view → rudder returns to centre', gone.out.yaw === 0);
+}
+
+console.log('double clap');
+{
+  const pair = (gapPalms, extra = {}) => {
+    const half = gapPalms * 0.12 / 2;
+    return [hand({ cx: 0.5 - half, cy: 0.5, left: true, ...extra }), hand({ cx: 0.5 + half, cy: 0.5, ...extra })];
+  };
+  // Feed a sequence of [seconds, hands] and count triggers.
+  const run = seq => {
+    const cl = X.createClap();
+    let fired = 0, tt = 0;
+    for (const [secs, hs] of seq) for (let i = 0; i < secs * 30; i++) { if (X.clapUpdate(cl, hs, tt)) fired++; tt += 1 / 30; }
+    return fired;
+  };
+  const apart = pair(4), touch = pair(0.6);
+  check('two claps (apart, together, apart, together) → calibrate once',
+    run([[0.5, apart], [0.1, touch], [0.25, apart], [0.1, touch], [0.5, apart]]) === 1);
+  check('one clap does nothing', run([[0.5, apart], [0.1, touch], [1, apart]]) === 0);
+  check('two claps 2 s apart do nothing', run([[0.5, apart], [0.1, touch], [2, apart], [0.1, touch], [0.5, apart]]) === 0);
+  // At contact the tracker often merges the two palms into one detection.
+  const merged = [hand({ cx: 0.5, cy: 0.5 })];
+  check('palms merging into one detection count as a clap', run([[0.5, pair(2.8)], [0.1, merged], [0.25, apart], [0.1, pair(2.8)], [0.1, merged], [0.5, apart]]) === 1);
+  check('bringing hands near but not touching (2 palms apart) does nothing', run([[0.5, apart], [0.2, pair(2)], [0.3, apart], [0.2, pair(2)], [0.5, apart]]) === 0);
+  // Normal flying: stick fist on the right, throttle hand on the left, moving about.
+  const cl = X.createClap();
+  let fired = 0;
+  for (let i = 0; i < 300; i++) {
+    const hs = [hand({ cx: 0.3, cy: 0.5 + 0.1 * Math.sin(i / 9), left: true }), hand({ fist: true, pitch: 0, roll: 88, cx: 0.7 + 0.05 * Math.sin(i / 5), cy: 0.6 })];
+    if (X.clapUpdate(cl, hs, i / 30)) fired++;
+  }
+  check('ten seconds of normal two-handed flying never triggers it', fired === 0);
+  const lone = X.createClap();
+  let f2 = 0;
+  for (let i = 0; i < 120; i++) if (X.clapUpdate(lone, i % 20 < 10 ? [hand({ cx: 0.7 })] : [], i / 30)) f2++;
+  check('one hand flickering in and out of view never triggers it', f2 === 0);
 }
 
 console.log('hand lost');

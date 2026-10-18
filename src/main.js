@@ -14,6 +14,7 @@ let debug = true;
 let hands = [];
 let face = null;             // 6 mirrored face keypoints, or null
 let head = createHead();
+let clap = createClap();
 let recorder = null;          // gesture recording in progress (G)
 let calib = null;            // { left } seconds of countdown
 let flashes = [];
@@ -67,9 +68,9 @@ function flash(text, color) {
   if (flashes.length > 3) flashes.shift();
 }
 
-function startCalibration() {
+function startCalibration(seconds) {
   if (mode !== 'camera') return;
-  calib = { left: CONFIG.CALIB_COUNTDOWN };
+  calib = { left: seconds || CONFIG.CALIB_COUNTDOWN };
   SFX.calib();
 }
 
@@ -171,6 +172,10 @@ function frame(ts) {
       hands = toHands(res.hands);
       face = res.face ? res.face.map(k => ({ x: 1 - k.x, y: k.y })) : null;
       headUpdate(head, face, now, settings);
+      if (clapUpdate(clap, hands, now) && !recorder) {
+        flash('CLAP CLAP — CALIBRATING', HUD.green);
+        startCalibration(CONFIG.CLAP_COUNTDOWN);
+      }
     }
   }
   if (camera) controlsUpdate(controls, hands, now, settings);
@@ -202,8 +207,9 @@ function frame(ts) {
     if (calib.left <= 0) finishCalibration();
   }
 
-  // The game pauses while recording, so nobody crashes into a hill holding "push forward".
-  if (!recorder) gameUpdate(game, ctrl, dt);
+  // The game pauses while recording or calibrating, so nobody crashes into a hill holding
+  // "push forward" or spins while their hand finds the stick again.
+  if (!recorder && !calib) gameUpdate(game, ctrl, dt);
   else game.events.length = 0;
   for (const e of game.events) {
     if (e.type === 'gun') SFX.gun();

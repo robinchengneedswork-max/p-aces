@@ -18,7 +18,7 @@ keyboard flying. Tests: `node test/headless.js` (57 checks, synthetic hands, no 
   - `2` **flight stick**: fist position off a calibrated centre = roll/pitch; twisting it = rudder.
 - **Other hand**: height = throttle, pinch thumb+index = gun, close the fist = missile (needs lock).
 - `C` 3-second calibration countdown: hold your neutral pose. Stored per scheme.
-- `X` assist (hand angle = bank angle, banks turn) / expert (stick = roll rate).
+- `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
 - Keyboard always works and overrides while held: arrows (down = pull up), Q/E yaw, W/S throttle,
   Space guns, F missile. `V` chase/cockpit, `D` debug panel + camera view, `R` reset.
 

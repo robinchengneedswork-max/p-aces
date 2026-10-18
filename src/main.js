@@ -124,6 +124,7 @@ async function finishRecording() {
     faceMs: Tracker.faceMs,
     renderFps: perf.fps,
     delegate: Tracker.delegate,
+    trackerMode: Tracker.mode,
     userAgent: navigator.userAgent,
   });
   const body = JSON.stringify(data);
@@ -271,6 +272,7 @@ function perfSample(ts, workMs) {
 function perfLine(camera) {
   let s = Math.round(perf.fps) + ' fps · ' + perf.workMs.toFixed(1) + ' ms js';
   if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz, ' + Tracker.detectMs.toFixed(1) + ' ms'
+    + (Tracker.mode === 'worker' ? ' (background)' : ' (BLOCKING)')
     + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · no face model');
   return s + ' · x' + settings.renderScale;
 }

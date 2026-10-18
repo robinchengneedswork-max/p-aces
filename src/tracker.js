@@ -27,6 +27,8 @@ const Tracker = {
   worker: null,
   busy: false,               // worker mode: a frame is out being detected
   result: null,              // worker mode: newest result not yet handed to the game
+  handsSeen: 0,              // hands in the newest result (diagnostics)
+  lastError: '',             // newest detection error from the worker (diagnostics)
 
   // delegate: 'GPU' (falls back to CPU) or 'CPU'. GPU wins on the user's laptop even while sharing
   // with the game's drawing (22-26 Hz vs 14-15 Hz on CPU), so GPU is the default.
@@ -39,6 +41,8 @@ const Tracker = {
     });
     await video.play();
     try {
+      // ?tracker=main forces the old main-thread path (a fallback while the worker is suspect).
+      if (new URLSearchParams(location.search).get('tracker') === 'main') throw new Error('forced main thread by ?tracker=main');
       await this.startWorker();
       this.mode = 'worker';
     } catch (err) {
@@ -77,12 +81,13 @@ const Tracker = {
   onResult(m) {
     if (m.type !== 'result') return;
     this.busy = false;
-    if (m.error) console.warn('[worker] detect failed', m.error);
+    if (m.error) { console.warn('[worker] detect failed', m.error); this.lastError = m.error; }
     this.detectMs += (m.detectMs - this.detectMs) * 0.1;
     if (m.faceMs) this.faceMs += (m.faceMs - this.faceMs) * 0.1;
     this.faceDetector = m.hasFace;
     this.countFrame(performance.now());
     this.result = { hands: m.hands, face: m.face };
+    this.handsSeen = m.hands.length;
   },
 
   async startMain() {
@@ -156,6 +161,7 @@ const Tracker = {
     this.detectMs += (performance.now() - t0 - this.detectMs) * 0.1;
     this.countFrame(nowMs);
     const hands = (res.landmarks || []).map((lm, i) => ({ lm, world: res.worldLandmarks[i] }));
+    this.handsSeen = hands.length;
     // Face runs every other camera frame: head look is heavily smoothed, and the recordings
     // showed hand tracking at 15-19 Hz, so the hands get the time.
     this.faceTick ^= 1;

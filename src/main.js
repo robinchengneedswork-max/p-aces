@@ -294,7 +294,8 @@ function perfSample(ts, workMs) {
 function perfLine(camera) {
   let s = Math.round(perf.fps) + ' fps (drawn ' + Math.round(perf.drawFps) + ') · ' + perf.workMs.toFixed(1) + ' ms js';
   if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz on ' + Tracker.delegate + ', ' + Tracker.detectMs.toFixed(1) + ' ms'
-    + (Tracker.mode === 'worker' ? ' (background)' : ' (BLOCKING)')
+    + (Tracker.mode === 'worker' ? ' (background)' : ' (main thread)') + ' · sees ' + Tracker.handsSeen + ' hand' + (Tracker.handsSeen === 1 ? '' : 's')
+    + (Tracker.lastError ? ' · ERROR ' + Tracker.lastError.slice(0, 60) : '')
     + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · no face model');
   return s + ' · x' + settings.renderScale;
 }

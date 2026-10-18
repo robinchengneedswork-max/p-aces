@@ -13,7 +13,7 @@ const RECORDINGS = path.join(ROOT, 'recordings');
 const MAX_RECORDING = 40 * 1024 * 1024;
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
-  '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.json': 'application/json',
+  '.wasm': 'application/wasm', '.task': 'application/octet-stream', '.tflite': 'application/octet-stream', '.json': 'application/json',
 };
 
 function saveRecording(req, res) {
@@ -44,7 +44,9 @@ http.createServer((req, res) => {
   if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    // no-store: during development the browser must never mix cached old modules with new ones
+    // (a local run once found no hands while the same build on Vercel was fine).
+    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   });
 }).listen(PORT, '127.0.0.1', () => console.log('Sky Ace → http://localhost:' + PORT + '/'));

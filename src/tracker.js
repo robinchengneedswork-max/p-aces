@@ -29,6 +29,7 @@ const Tracker = {
   result: null,              // worker mode: newest result not yet handed to the game
   handsSeen: 0,              // hands in the newest result (diagnostics)
   lastError: '',             // newest detection error from the worker (diagnostics)
+  faceError: '',             // why the face model (head look) didn't start, if it didn't
 
   // delegate: 'GPU' (falls back to CPU) or 'CPU'. GPU wins on the user's laptop even while sharing
   // with the game's drawing (22-26 Hz vs 14-15 Hz on CPU), so GPU is the default.
@@ -67,6 +68,8 @@ const Tracker = {
         if (m.type === 'ready') {
           clearTimeout(timer);
           this.delegate = m.delegate;
+          this.faceDetector = m.hasFace;
+          this.faceError = m.faceError || '';
           w.onmessage = ev => this.onResult(ev.data);
           resolve();
         } else if (m.type === 'error') {

@@ -6,12 +6,21 @@
 import { FilesetResolver, HandLandmarker, FaceDetector } from '../vendor/mediapipe/vision_bundle.mjs';
 
 const VENDOR = new URL('../vendor/mediapipe/', import.meta.url);
-let hands = null, face = null, delegate = '', faceTick = 0, lastFace = null;
+let hands = null, face = null, delegate = '', faceTick = 0, lastFace = null, faceError = '';
+
+// MediaPipe's module wasm loader sets self.ModuleFactory once, as a side effect of being imported,
+// and MediaPipe clears it after building a task. The second task (the face model) then imports the
+// cached module, nothing runs, and it fails with "ModuleFactory not set." — which silently turned
+// head look off. Put the factory back before every task.
+async function restoreFactory(fileset) {
+  if (!self.ModuleFactory) self.ModuleFactory = (await import(fileset.wasmLoaderPath)).default;
+}
 
 async function init(delegates) {
   const fileset = await FilesetResolver.forVisionTasks(new URL('wasm', VENDOR).href, true);
   for (const d of delegates) {
     try {
+      await restoreFactory(fileset);
       hands = await HandLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: new URL('hand_landmarker.task', VENDOR).href, delegate: d },
         runningMode: 'VIDEO',
@@ -30,6 +39,7 @@ async function init(delegates) {
   if (!hands) throw new Error('Could not start hand tracking in the worker');
   // Head look is a bonus: if the face model won't start, hands still work.
   try {
+    await restoreFactory(fileset);
     face = await FaceDetector.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: new URL('blaze_face_short_range.tflite', VENDOR).href, delegate },
       runningMode: 'VIDEO',
@@ -37,6 +47,7 @@ async function init(delegates) {
     });
   } catch (err) {
     console.warn('[worker] FaceDetector failed; head look disabled', err);
+    faceError = String(err && err.message || err);
   }
 }
 
@@ -68,7 +79,7 @@ self.onmessage = async e => {
   if (m.type === 'init') {
     try {
       await init(m.delegates || ['GPU', 'CPU']);
-      self.postMessage({ type: 'ready', delegate });
+      self.postMessage({ type: 'ready', delegate, hasFace: !!face, faceError });
     } catch (err) {
       self.postMessage({ type: 'error', message: String(err && err.message || err) });
     }

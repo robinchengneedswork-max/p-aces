@@ -296,7 +296,7 @@ function perfLine(camera) {
   if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz on ' + Tracker.delegate + ', ' + Tracker.detectMs.toFixed(1) + ' ms'
     + (Tracker.mode === 'worker' ? ' (background)' : ' (main thread)') + ' · sees ' + Tracker.handsSeen + ' hand' + (Tracker.handsSeen === 1 ? '' : 's')
     + (Tracker.lastError ? ' · ERROR ' + Tracker.lastError.slice(0, 60) : '')
-    + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · no face model');
+    + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · NO FACE MODEL (head look off)' + (Tracker.faceError ? ': ' + Tracker.faceError.slice(0, 60) : ''));
   return s + ' · x' + settings.renderScale;
 }
 

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sky Ace</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="debug">
+<video id="cam" playsinline muted></video>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+
+<div id="panel">
+  <div class="panel-title">Tuning <small>(saved)</small></div>
+</div>
+<div id="keys">1 flat hand · 2 stick · C calibrate · X assist/expert · P pitch tilt/height · I invert · T stick twist · L head look · G record gestures · H swap hand · V view · D debug · R reset</div>
+
+<div id="screen-start" class="screen active">
+  <div class="card">
+    <h1>Sky Ace</h1>
+    <p><b>Fly with one hand</b> gripping an imaginary flight stick: move your fist left/right to roll,
+      up to pull back, down to push. Keep pulling and you'll loop right over the top.
+      Or press <b>1</b> to fly with a flat hand like a paper plane instead.</p>
+    <p><b>The other hand</b> is throttle and weapons: raise it for speed, <b>pinch</b> thumb and index to fire guns,
+      <b>close your fist</b> for a missile (wait for the lock tone).</p>
+    <p class="small">Sit about an arm's length from the webcam with both hands in view. You'll get a 3-second
+      countdown to hold your flying hand level, so the game knows what "straight ahead" means.
+      Turn your head a little to look around (L turns that off). <b>V</b> switches between chase and cockpit view. Keyboard always works too: arrows fly, W/S throttle, Space guns, F missile.</p>
+    <div class="buttons">
+      <button id="btn-camera">Start camera</button>
+      <button id="btn-keys" class="ghost">Keyboard only</button>
+    </div>
+    <p id="start-msg" class="small"></p>
+  </div>
+</div>
+
+<script src="vendor/three/three.min.js"></script>
+<script src="src/config.js"></script>
+<script src="src/math.js"></script>
+<script src="src/flight.js"></script>
+<script src="src/hands.js"></script>
+<script src="src/head.js"></script>
+<script src="src/recorder.js"></script>
+<script src="src/game.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/render.js"></script>
+<script src="src/hud.js"></script>
+<script src="src/main.js"></script>
+<script type="module" src="src/tracker.js"></script>
+</body>
+</html>

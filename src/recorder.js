@@ -64,7 +64,7 @@ function handSample(h) {
 // One camera frame: both hands as assigned, plus what the controls made of it.
 function recorderAdd(rec, t, hands, s, controls) {
   if (rec.done) return;
-  const { fly, thr } = assignHands(hands, s);
+  const { fly, thr } = controls.assigned;
   rec.frames.push({
     t: r4(t - rec.t0),
     step: RECORD_STEPS[rec.i].id,
@@ -75,6 +75,23 @@ function recorderAdd(rec, t, hands, s, controls) {
     raw: { roll: r4(controls.raw.roll), pitch: r4(controls.raw.pitch), yaw: r4(controls.raw.yaw) },
     out: { roll: r4(controls.out.roll), pitch: r4(controls.out.pitch), yaw: r4(controls.out.yaw) },
   });
+}
+
+// The recording's 'centred' hold, as a stick neutral: a fresher calibration than C's, taken
+// right before the motions it's compared with.
+function neutralFromRecording(rec) {
+  const hold = rec.frames.filter(f => f.step === 'neutral' && f.phase === 'hold' && f.fly);
+  if (hold.length < 5) return null;
+  const t0 = hold[0].t;
+  const fs = hold.filter(f => f.t - t0 >= 0.5).map(f => f.fly.m);
+  if (fs.length < 5) return null;
+  const avg = k => fs.reduce((a, m) => a + m[k], 0) / fs.length;
+  const r0 = fs[0].roll, p0 = fs[0].pitch;
+  return {
+    roll: r0 + fs.reduce((a, m) => a + foldHalf(m.roll - r0), 0) / fs.length,
+    pitch: p0 + fs.reduce((a, m) => a + wrapAngle(m.pitch - p0), 0) / fs.length,
+    cx: avg('cx'), cy: avg('cy'), scale: avg('scale'),
+  };
 }
 
 function recorderResult(rec, s, meta) {

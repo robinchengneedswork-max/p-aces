@@ -51,7 +51,12 @@ const CONFIG = {
   // Hands → controls
   HAND_LOST_HOLD: 0.3,       // seconds to hold the last input after a hand vanishes
   STICK_LOST_HOLD: 0.6,      // a fist at an odd angle drops out more; hold it longer
-  EDGE_MARGIN: 0.08,         // warn when the flying hand's palm centre is this close to a frame edge
+  EDGE_MARGIN: 0.08,
+  ROOM_MARGIN: 0.25,         // calibration warns if the stick centre is closer than this to an edge
+  DEPTH_ROLL_MUTE: 0.7,      // full roll mutes the stick's depth (push/pull) term by this much
+  STILL_TIME: 3,             // hand still this long (s)…
+  STILL_MOVE: 0.15,          // …(moved less than this many palm lengths)…
+  OFF_CENTRE: 0.35,          // …but still steering this hard = suggest re-centring         // warn when the flying hand's palm centre is this close to a frame edge
   HAND_LOST_DECAY: 3,        // then decays to centre at this rate (1/s)
   PINCH_ON: 0.32, PINCH_OFF: 0.5,
   FIST_ON: 1.2, FIST_OFF: 1.5,

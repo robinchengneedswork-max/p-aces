@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, assistOn, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, assistOn, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -183,6 +183,53 @@ console.log('two hands');
   check('a fist is not read as a pinch', guns === 0, guns + ' gun frames');
 }
 
+console.log('from the first recordings');
+{
+  const s = settings({ scheme: 'stick' });
+  const GRIP = 88;
+  const fist = o => hand({ fist: true, pitch: 0, cy: 0.7, cx: 0.78, ...o, roll: GRIP + (o.roll || 0) });
+  const open = hand({ cx: 0.26, cy: 0.72, left: true });
+  X.calibrateNeutral(s, [fist({})]);
+  // Recording 1, push: both hands seen, then the stick fist drops out and only the open
+  // throttle hand on the left is left in view.
+  const c = X.createControls();
+  for (let i = 0; i < 30; i++) X.controlsUpdate(c, [open, fist({})], i / 30, s);
+  let worst = 0;
+  for (let i = 0; i < 20; i++) {
+    X.controlsUpdate(c, [open], 1 + i / 30, s);
+    worst = Math.max(worst, Math.abs(c.out.roll), Math.abs(c.out.pitch));
+  }
+  check('fist drops out: the open throttle hand does NOT take over flying', c.assigned.fly === null && c.assigned.thr === open && worst === 0,
+    'fly ' + (c.assigned.fly ? 'throttle hand!' : 'none') + ', worst input ' + worst.toFixed(2));
+  X.controlsUpdate(c, [fist({})], 2, s);
+  check('…and the fist coming back alone is the flying hand again', c.assigned.fly !== null && c.assigned.thr === null);
+  const solo = X.createControls();
+  X.controlsUpdate(solo, [fist({ cx: 0.3 })], 0, s);
+  check('one hand from the start flies, wherever it is', solo.assigned.fly !== null);
+
+  // Rolling a pivoting stick shrinks the fist (it swings away from the camera).
+  const sNoMute = s;
+  const rolled = fist({ cx: 0.88, roll: 15, size: 0.85 });
+  const muted = drive([rolled], 30, s).raw.pitch;
+  const depthOnly = -Math.log(0.85) / s.stickDepth;
+  check('rolled fist that looks smaller: depth mostly muted, little false nose-up', muted < depthOnly * 0.5, muted.toFixed(2) + ' vs unmuted ' + depthOnly.toFixed(2));
+  check('a straight pull (no roll) keeps its full depth', drive([fist({ size: 0.85 })], 30, sNoMute).raw.pitch > depthOnly * 0.95);
+
+  // Centre drifted: hand held still, but reads as steering.
+  const cs = X.createControls();
+  for (let i = 0; i < 120; i++) X.controlsUpdate(cs, [fist({ size: 0.86 })], i / 30, s);
+  check('still hand that keeps steering → "press C to re-centre" hint', cs.offCentre);
+  const cm = X.createControls();
+  for (let i = 0; i < 120; i++) X.controlsUpdate(cm, [fist({ size: 0.86, cx: 0.78 + 0.1 * Math.sin(i / 6) })], i / 30, s);
+  check('…but not while the hand is actually moving', !cm.offCentre);
+  const cn = X.createControls();
+  for (let i = 0; i < 120; i++) X.controlsUpdate(cn, [fist({})], i / 30, s);
+  check('…and not when it rests centred', !cn.offCentre);
+
+  check('calibrating at 78% across warns about room to roll', X.neutralRoom({ cx: 0.78, cy: 0.6 }) !== '');
+  check('calibrating mid-frame does not', X.neutralRoom({ cx: 0.5, cy: 0.55 }) === '');
+}
+
 console.log('hand lost');
 {
   const s = settings();
@@ -307,6 +354,9 @@ console.log('gesture recorder');
   check('report ranks depth or height as the top pitch signal', ['depth', 'dy'].includes(topSignal('PITCH')), topSignal('PITCH'));
   check('report ranks knuckles or slide as the top roll signal', ['knuckles', 'dx'].includes(topSignal('ROLL')), topSignal('ROLL'));
   check('game read the pull as nose up during the hold', row('pull').game.pitch > 0.5, row('pull').game.pitch.toFixed(2));
+  const fresh = X.neutralFromRecording(rec), cal = s.neutral.stick;
+  check('recording\'s centred step becomes the calibration', fresh && Math.abs(fresh.cx - cal.cx) < 1e-3 && Math.abs(fresh.scale - cal.scale) < 1e-3
+    && Math.abs(fresh.roll - cal.roll) < 0.01);
 }
 
 console.log('flight');

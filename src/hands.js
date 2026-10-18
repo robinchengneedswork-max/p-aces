@@ -60,12 +60,26 @@ function measureHand(h) {
   return { roll, pitch, cx, cy, scale, open, pinch };
 }
 
-// Two hands: split by screen side. One hand: it's the flying hand.
-function assignHands(hands, s) {
+// Two hands: split by screen side. One hand: once both roles have been seen, whichever role it
+// was last near (memo holds the last palm positions); before that, it flies. A lone hand used to always fly, so when the
+// stick fist dropped out the open throttle hand took over and flung the plane around (seen in
+// the user's first recording).
+function assignHands(hands, s, memo) {
   if (!hands || !hands.length) return { fly: null, thr: null };
-  if (hands.length === 1) return { fly: hands[0], thr: null };
-  const [a, b] = hands[0].lm[0].x < hands[1].lm[0].x ? [hands[0], hands[1]] : [hands[1], hands[0]];
-  return s.hand === 'right' ? { fly: b, thr: a } : { fly: a, thr: b };
+  if (hands.length === 2) {
+    const [a, b] = hands[0].lm[0].x < hands[1].lm[0].x ? [hands[0], hands[1]] : [hands[1], hands[0]];
+    return s.hand === 'right' ? { fly: b, thr: a } : { fly: a, thr: b };
+  }
+  const h = hands[0], x = h.lm[HL.MIDDLE_MCP].x, y = h.lm[HL.MIDDLE_MCP].y;
+  const d = p => (p ? Math.hypot(p.x - x, p.y - y) : Infinity);
+  const isFly = !(memo && memo.fly && memo.thr) || d(memo.fly) <= d(memo.thr);
+  return isFly ? { fly: h, thr: null } : { fly: null, thr: h };
+}
+
+function rememberHands(memo, a) {
+  const pos = h => ({ x: h.lm[HL.MIDDLE_MCP].x, y: h.lm[HL.MIDDLE_MCP].y });
+  if (a.fly) memo.fly = pos(a.fly);
+  if (a.thr) memo.thr = pos(a.thr);
 }
 
 function createControls() {
@@ -75,6 +89,10 @@ function createControls() {
     out: { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false },
     flyM: null, thrM: null,                // last measurements, for the debug view
     flySeen: -1,
+    assigned: { fly: null, thr: null },
+    memo: { fly: null, thr: null },        // last palm positions per role, for assignHands
+    still: null,                           // { t, cx, cy } where the flying hand went still
+    offCentre: false,                      // hand still for a while but still steering
     edge: false,                           // flying hand near the edge of the camera view
     lastT: 0,
     pinched: false,
@@ -109,7 +127,9 @@ function controlsUpdate(c, hands, t, s) {
   const dt = Math.max(0, t - c.lastT);
   c.lastT = t;
   c.out.missile = false;
-  const { fly, thr } = assignHands(hands, s);
+  c.assigned = assignHands(hands, s, c.memo);
+  rememberHands(c.memo, c.assigned);
+  const { fly, thr } = c.assigned;
   const n = neutralFor(s);
 
   c.flyM = fly ? measureHand(fly) : null;
@@ -126,7 +146,11 @@ function controlsUpdate(c, hands, t, s) {
       // rudder instead (and leaks into rolls, since a pivoting stick tilts the fist as it goes over).
       if (s.twistRudder) yaw = tilt;
       else roll += tilt;
-      const depth = -Math.log(m.scale / scale) / s.stickDepth;   // + = smaller = pulled back
+      // Rolling swings the fist round the stick's pivot, away from the camera, so it looks
+      // smaller: read as a pull. Recordings showed rolls reading up to +1.2 nose-up; muting the
+      // depth term while rolled cut that by half to two-thirds.
+      const mute = 1 - CONFIG.DEPTH_ROLL_MUTE * Math.min(1, Math.abs(roll));
+      const depth = -Math.log(m.scale / scale) / s.stickDepth * mute;   // + = smaller = pulled back
       pitch = -(m.cy - n.cy) / scale / s.stickThrow + depth;
     } else {
       roll = foldHalf(m.roll - n.roll) / (s.rollRange * DEG);
@@ -139,6 +163,11 @@ function controlsUpdate(c, hands, t, s) {
     c.raw.pitch = oneEuroStep(c.f.pitch, pitch, t, s.minCutoff, s.beta);
     c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
     c.flySeen = t;
+    // Still hand that's still steering = the centre has drifted (sat closer, moved the stick).
+    const moved = c.still && Math.hypot(m.cx - c.still.cx, m.cy - c.still.cy) / scale > CONFIG.STILL_MOVE;
+    if (!c.still || moved) c.still = { t, cx: m.cx, cy: m.cy };
+    c.offCentre = t - c.still.t > CONFIG.STILL_TIME
+      && Math.max(Math.abs(c.raw.roll), Math.abs(c.raw.pitch)) > CONFIG.OFF_CENTRE;
     c.edge = m.cx < CONFIG.EDGE_MARGIN || m.cx > 1 - CONFIG.EDGE_MARGIN || m.cy < CONFIG.EDGE_MARGIN || m.cy > 1 - CONFIG.EDGE_MARGIN;
   } else if (t - c.flySeen > (s.scheme === 'stick' ? CONFIG.STICK_LOST_HOLD : CONFIG.HAND_LOST_HOLD)) {
     // Hand gone: hold briefly (blur, a dropped frame), then let the stick spring back.
@@ -171,6 +200,16 @@ function controlsUpdate(c, hands, t, s) {
 }
 
 // Snapshot the flying hand's current pose as centre for the current scheme.
+// A centre near the frame edge leaves no room to roll that way (the user's fist sat at 75-80%
+// across, and rolling right ran out of frame). Returns a warning, or ''.
+function neutralRoom(n) {
+  if (!n) return '';
+  if (n.cx > 1 - CONFIG.ROOM_MARGIN || n.cx < CONFIG.ROOM_MARGIN || n.cy > 1 - CONFIG.ROOM_MARGIN || n.cy < CONFIG.ROOM_MARGIN) {
+    return 'Your flying hand is near the edge of the camera — move it (or the camera) toward the middle for room to roll';
+  }
+  return '';
+}
+
 function calibrateNeutral(s, hands) {
   const { fly } = assignHands(hands, s);
   if (!fly) return false;

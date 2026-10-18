@@ -72,6 +72,8 @@ function startCalibration() {
 function finishCalibration() {
   calib = null;
   const gotHand = calibrateNeutral(settings, hands);
+  const room = gotHand ? neutralRoom(settings.neutral[settings.scheme]) : '';
+  if (room) setTimeout(() => flash(room, HUD.amber), 900);
   const gotHead = calibrateHead(settings, face);
   if (gotHead) head = createHead();
   if (gotHand) controls = createControls();
@@ -96,10 +98,23 @@ async function finishRecording() {
   const rec = recorder;
   recorder = null;
   SFX.ring();
+  // The recording's centred step is the freshest calibration there is: adopt it.
+  const fresh = neutralFromRecording(rec);
+  if (fresh) {
+    settings.neutral = { ...(settings.neutral || {}), [settings.scheme]: fresh };
+    saveSettings();
+    controls = createControls();
+    flash('RE-CENTRED FROM RECORDING', HUD.green);
+    const room = neutralRoom(fresh);
+    if (room) setTimeout(() => flash(room, HUD.amber), 900);
+  }
   const data = recorderResult(rec, settings, {
     date: new Date().toISOString(),
     video: video.videoWidth + 'x' + video.videoHeight,
     trackerFps: Tracker.fps,
+    detectMs: Tracker.detectMs,
+    faceMs: Tracker.faceMs,
+    renderFps: perf.fps,
     delegate: Tracker.delegate,
     userAgent: navigator.userAgent,
   });
@@ -206,10 +221,11 @@ function frame(ts) {
 
   renderWorld(world, game, dt, now, camera ? head.look : null, ctrl);
 
-  const assigned = camera ? assignHands(hands, settings) : { fly: null, thr: null };
+  const assigned = camera ? controls.assigned : { fly: null, thr: null };
   let warn = '';
   if (camera && !assigned.fly && !kbActive) warn = 'SHOW YOUR FLYING HAND';
   else if (camera && controls.edge) warn = 'HAND AT EDGE OF CAMERA — bring it toward the middle';
+  else if (camera && controls.offCentre && !kbActive) warn = 'Hand is still but the plane is still steering — press C to re-centre';
   else if (camera && !(settings.neutral && settings.neutral[settings.scheme])) warn = 'Press C to calibrate';
   drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,

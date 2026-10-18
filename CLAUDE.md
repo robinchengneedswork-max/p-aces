@@ -82,4 +82,21 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   - Known: the game's flat-hand pitch reading (`measureHand().pitch`) flips by ~180° when an
     upright stick grip rolls past vertical (fold in the de-rotation). Stick mode doesn't use it;
     the analyzer uses roll-invariant elevation instead.
-- Next: user records with the chopstick; analyze, then retune the stick mapping from the data.
+- **Round 5 (2026-10-18), from the user's first two chopstick recordings** (gitignored, in
+  `recordings/`; replay script was a scratch file, the analyzer has the numbers):
+  - Bug: a lone hand always flew. When the stick fist dropped out, the **open throttle hand took
+    over flying**. Now a lone hand goes to the role it was last near (`assignHands` memo) once
+    both roles are known; before that it flies.
+  - The saved centre was stale: resting reads were pitch -0.81 (rec 1) and +0.34 (rec 2),
+    mostly depth from sitting at a different distance. The recorder now adopts its centred step
+    as the calibration, and a still-but-steering hand shows "press C to re-centre".
+  - The fist rested at 75-80% across the frame; rolling right hit 94% (weaker than left).
+    Calibration now warns if the centre is within 25% of an edge.
+  - With a true centre, roll works (rec 2: -1.00/+1.10; slide dx is the strongest signal).
+    Pitch is the weak axis: push/pull is depth to a front camera, and depth is polluted by rolls
+    (the fist swings away round the pivot), fist rotation and posture. Depth is now muted 70% at
+    full roll (roll-left false nose-up 0.66 → 0.21). A per-session least-squares fit didn't
+    transfer between sessions (rms 0.72-0.77), so no personal fitted mapping.
+  - Hand tracking ran at 15-19 Hz: face detection now runs every other frame; recordings log
+    detect/face ms and render fps.
+- Next: user re-records after these fixes (stick hand mid-frame) to compare.

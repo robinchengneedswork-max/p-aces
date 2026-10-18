@@ -13,6 +13,8 @@ const Tracker = {
   fps: 0,
   detectMs: 0,
   faceMs: 0,
+  faceTick: 0,
+  lastFace: null,
   frames: 0,
   fpsSince: 0,
 
@@ -75,8 +77,11 @@ const Tracker = {
       this.fpsSince = nowMs;
     }
     const hands = (res.landmarks || []).map((lm, i) => ({ lm, world: res.worldLandmarks[i] }));
-    let face = null;
-    if (this.faceDetector) {
+    // Face runs every other camera frame: head look is heavily smoothed, and the recordings
+    // showed hand tracking at 15-19 Hz, so the hands get the time.
+    this.faceTick ^= 1;
+    let face = this.lastFace;
+    if (this.faceDetector && this.faceTick) {
       const t1 = performance.now();
       const fr = this.faceDetector.detectForVideo(v, nowMs);
       this.faceMs += (performance.now() - t1 - this.faceMs) * 0.1;
@@ -87,6 +92,7 @@ const Tracker = {
         if (d.keypoints && d.keypoints.length >= 6 && (!best || area > best.area)) best = { area, kp: d.keypoints };
       }
       face = best ? best.kp : null;
+      this.lastFace = face;
     }
     return { hands, face };
   },

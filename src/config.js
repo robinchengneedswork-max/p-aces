@@ -69,6 +69,7 @@ const CONFIG = {
   INPUT_EASE: 12,            // stick/rudder output glides toward the filtered input at this rate (1/s),
                              // every drawn frame: hand tracking only updates ~20x/s, and the steps
                              // between updates were most of the jitter (-58% on the recordings, no added lag)
+  ANIME_FPS: 24,             // anime look: the picture updates on this cadence (the game doesn't)
   FOV_BASE: 65,              // camera field of view at minimum speed (degrees)…
   FOV_SPEED: 18,             // …plus this much at top speed (and a little more past it)
   CLAP_COUNTDOWN: 4,         // after a double clap: an extra second to get back on the stick
@@ -106,6 +107,7 @@ const CONFIG = {
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
     beta: 0.6,
     renderScale: 1,          // pixels per CSS pixel; lower = faster on a laptop GPU
+    anime: false,            // T: anime look (24 fps cadence, cel shading, ink, speed lines)
     headLook: true,          // turn your head to look around (face tracking)
     headGain: 11,            // radians of view per unit of nose offset (face widths)
     headDeadzone: 0.045,

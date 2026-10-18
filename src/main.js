@@ -20,6 +20,9 @@ let calib = null;            // { left } seconds of countdown
 let flashes = [];
 let missileFlash = 0;
 let lockTickT = 0;
+let drawAcc = 0;               // anime look: time banked toward the next 24 fps picture
+let sinceDraw = 0;             // time since the last picture (what the renderer animates by)
+let pendingEvents = [];        // game events since the last picture (explosions mustn't be skipped)
 let W = 0, H = 0;
 let lastTs = 0;
 const keys = new Set();
@@ -214,6 +217,7 @@ function frame(ts) {
   // "push forward" or spins while their hand finds the stick again.
   if (!recorder && !calib) gameUpdate(game, ctrl, dt);
   else game.events.length = 0;
+  pendingEvents.push(...game.events);
   for (const e of game.events) {
     if (e.type === 'gun') SFX.gun();
     if (e.type === 'missile') { SFX.missile(); missileFlash = 0.4; }
@@ -233,7 +237,20 @@ function frame(ts) {
   for (const f of flashes) f.age += dt;
   flashes = flashes.filter(f => f.age < 1.4);
 
-  renderWorld(world, game, dt, now, camera ? head.look : null, ctrl);
+  // The anime look draws on a fixed 24 fps cadence; the game, input and sound above run every frame.
+  sinceDraw += dt;
+  drawAcc += dt;
+  const step = 1 / CONFIG.ANIME_FPS;
+  const draw = !settings.anime || drawAcc >= step;
+  if (settings.anime) { if (draw) drawAcc = drawAcc - step > step ? 0 : drawAcc - step; } else drawAcc = 0;
+  if (draw) {
+    const view = Object.create(game);
+    view.events = pendingEvents;
+    renderWorld(world, view, sinceDraw, now, camera ? head.look : null, ctrl);
+    pendingEvents = [];
+    sinceDraw = 0;
+    perf.draws++;
+  }
 
   const assigned = camera ? controls.assigned : { fly: null, thr: null };
   let warn = '';
@@ -241,7 +258,7 @@ function frame(ts) {
   else if (camera && controls.edge) warn = 'HAND AT EDGE OF CAMERA — bring it toward the middle';
   else if (camera && controls.offCentre && !kbActive) warn = 'Hand is still but the plane is still steering — press C to re-centre';
   else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
-  drawHud(hctx, W, H, {
+  if (draw) drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
     throttle: ctrl.throttle, gun: ctrl.gun, missileFlash,
     status: camera ? statusLine() : '',
@@ -257,20 +274,22 @@ function frame(ts) {
 
 // Frames per second, and how long our JS takes per frame (hand detection included).
 // GPU time isn't in "ms": if fps is low but ms is small, the GPU is the bottleneck.
-const perf = { frames: 0, since: 0, fps: 0, workMs: 0 };
+const perf = { frames: 0, since: 0, fps: 0, workMs: 0, draws: 0, drawFps: 0 };
 
 function perfSample(ts, workMs) {
   perf.workMs += (workMs - perf.workMs) * 0.05;
   perf.frames++;
   if (ts - perf.since >= 1000) {
     perf.fps = perf.frames * 1000 / (ts - perf.since);
+    perf.drawFps = perf.draws * 1000 / (ts - perf.since);
     perf.frames = 0;
+    perf.draws = 0;
     perf.since = ts;
   }
 }
 
 function perfLine(camera) {
-  let s = Math.round(perf.fps) + ' fps · ' + perf.workMs.toFixed(1) + ' ms js';
+  let s = Math.round(perf.fps) + ' fps' + (settings.anime ? ' (drawn ' + Math.round(perf.drawFps) + ')' : '') + ' · ' + perf.workMs.toFixed(1) + ' ms js';
   if (camera && window.Tracker) s += ' · hands ' + Math.round(Tracker.fps) + ' Hz, ' + Tracker.detectMs.toFixed(1) + ' ms'
     + (Tracker.mode === 'worker' ? ' (background)' : ' (BLOCKING)')
     + (Tracker.faceDetector ? ' · face ' + Tracker.faceMs.toFixed(1) + ' ms' : ' · no face model');
@@ -330,6 +349,7 @@ async function start(useCamera) {
   }
   mode = useCamera ? 'camera' : 'keyboard';
   world = createWorld(glCanvas, settings.renderScale);
+  if (settings.anime) setAnime(world, true);
   resize();
   showScreen(null);
   document.body.classList.toggle('debug', debug);
@@ -369,6 +389,12 @@ window.addEventListener('keydown', e => {
   }
   if (e.code === 'KeyP') toggle('pitchSrc', 'tilt', 'height', v => 'PITCH FROM PALM ' + (v === 'tilt' ? 'TILT' : 'HEIGHT'));
   if (e.code === 'KeyL') toggle('headLook', true, false, v => (v ? 'HEAD LOOK ON' : 'HEAD LOOK OFF'));
+  if (e.code === 'KeyT') {
+    settings.anime = !settings.anime;
+    saveSettings();
+    setAnime(world, settings.anime);
+    flash(settings.anime ? 'ANIME LOOK: 24 fps, cel shading, ink' : 'NORMAL LOOK', HUD.ink);
+  }
   if (e.code === 'KeyY') toggle('thrRudder', false, true, v => (v ? 'RUDDER: turn your left hand like a dial' : 'RUDDER: Q/E keys only'));
   if (e.code === 'KeyI') toggle('invertPitch', false, true, v => (v ? 'PITCH INVERTED' : 'PITCH NORMAL'));
   if (e.code === 'KeyH') toggle('hand', 'right', 'left', v => 'FLYING HAND: ' + v.toUpperCase());

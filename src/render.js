@@ -23,7 +23,7 @@ function createWorld(canvas, pixelRatio) {
     drones: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
     trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
-  scene.add(w.terrain, w.sea, w.clouds.mesh, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
+  scene.add(w.terrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
   return w;
 }
 
@@ -102,7 +102,12 @@ function makeClouds() {
     }
     list.push({ x: (rng() - 0.5) * 9000, y: 1300 + rng() * 900, z: (rng() - 0.5) * 9000, puffs });
   }
-  const clouds = { mesh, list };
+  // Ink: the same puffs a touch bigger, back faces only, drawn in the anime look.
+  const ink = new THREE.InstancedMesh(mesh.geometry, INK_MAT, CLOUDS * PUFFS);
+  ink.frustumCulled = false;
+  ink.visible = false;
+  ink.userData.isInk = true;
+  const clouds = { mesh, ink, list };
   list.forEach((c, i) => placeCloud(clouds, i));
   return clouds;
 }
@@ -113,8 +118,11 @@ function placeCloud(clouds, i) {
   c.puffs.forEach((p, j) => {
     m.makeScale(p.sx, p.sy, p.sz).setPosition(c.x + p.x, c.y + p.y, c.z + p.z);
     clouds.mesh.setMatrixAt(i * PUFFS + j, m);
+    m.makeScale(p.sx * 1.05, p.sy * 1.08, p.sz * 1.05).setPosition(c.x + p.x, c.y + p.y, c.z + p.z);
+    clouds.ink.setMatrixAt(i * PUFFS + j, m);
   });
   clouds.mesh.instanceMatrix.needsUpdate = true;
+  clouds.ink.instanceMatrix.needsUpdate = true;
 }
 
 // A little delta-wing jet pointing down -z, like every THREE object.
@@ -148,6 +156,7 @@ function makePlaneModel() {
   flame.position.set(0, 0, 8.5);
   g.add(flame);
   g.userData.flame = flame;
+  for (const part of [fus, wing, fin, canard]) addInk(part, 0.26);
   return g;
 }
 
@@ -265,11 +274,14 @@ function makeDroneModel() {
   halo.rotation.x = Math.PI / 2;
   g.add(halo);
   g.userData.halo = halo;
+  for (const part of g.children) addInk(part, 1.6);
   return g;
 }
 
 function makeRing() {
-  return new THREE.Mesh(new THREE.TorusGeometry(CONFIG.RING_R, 3, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd34a }));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(CONFIG.RING_R, 3, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd34a }));
+  addInk(ring, 1.4);
+  return ring;
 }
 
 function makeTracers() {
@@ -407,7 +419,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   for (const d of g.drones) {
     alive.add(d.id);
     let m = w.drones.get(d.id);
-    if (!m) { m = makeDroneModel(); w.drones.set(d.id, m); w.scene.add(m); }
+    if (!m) { m = makeDroneModel(); styleNew(w, m); w.drones.set(d.id, m); w.scene.add(m); }
     m.position.copy(tv(d.pos));
     m.rotation.y = now * 1.5;
     m.userData.halo.rotation.z = now * 3;
@@ -525,6 +537,64 @@ function updateCamera(w, p, dt, look) {
   cam.position.copy(w.camPos);
   cam.up.copy(w.camUp);
   cam.lookAt(pos.clone().addScaledVector(fwd, 90));
+}
+
+// ---- Anime look -----------------------------------------------------------------------------
+// Purely how things are drawn (T). Lit materials swap to 3-band toon shading, ink outlines appear
+// (inverted hull: a slightly bigger back-face copy in ink), and main.js draws on a 24 fps cadence
+// while the game and the hand tracking keep running at full rate.
+const INK = 0x161b2a;
+const INK_MAT = new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide });
+
+function addInk(mesh, thick) {
+  const g = mesh.geometry;
+  g.computeBoundingSphere();
+  const c = g.boundingSphere.center, s = 1 + thick / (g.boundingSphere.radius || 1);
+  const ink = new THREE.Mesh(g, INK_MAT);
+  // Scale about the part's own centre, so off-centre parts (the wing) grow in place.
+  ink.scale.setScalar(s);
+  ink.position.copy(c).multiplyScalar(1 - s);
+  ink.userData.isInk = true;
+  ink.visible = false;
+  mesh.add(ink);
+}
+
+function toonGradient() {
+  const t = new THREE.DataTexture(new Uint8Array([90, 170, 255]), 3, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+function styleMesh(o, on, grad) {
+  if (!o.isMesh) return;
+  if (o.userData.isInk) { o.visible = on; return; }
+  const m = o.material;
+  if (on && (m.isMeshPhongMaterial || m.isMeshLambertMaterial)) {
+    if (!m.userData.toon) {
+      m.userData.toon = new THREE.MeshToonMaterial({
+        color: m.color, vertexColors: m.vertexColors, emissive: m.emissive ? m.emissive.clone().multiplyScalar(0.6) : new THREE.Color(0),
+        transparent: m.transparent, opacity: m.opacity, side: m.side, depthWrite: m.depthWrite, gradientMap: grad,
+      });
+      m.userData.toon.userData.orig = m;
+    }
+    o.material = m.userData.toon;
+  } else if (!on && m.isMeshToonMaterial && m.userData.orig) {
+    o.material = m.userData.orig;
+  }
+}
+
+function setAnime(w, on) {
+  w.anime = on;
+  w.grad = w.grad || toonGradient();
+  w.scene.traverse(o => styleMesh(o, on, w.grad));
+  w.cockpit.scene.traverse(o => styleMesh(o, on, w.grad));
+  w.clouds.ink.visible = on;
+}
+
+// Things created after the toggle (drones) pick up the current look.
+function styleNew(w, obj) {
+  if (w.anime) obj.traverse(o => styleMesh(o, true, w.grad));
 }
 
 function resizeWorld(w, W, H) {

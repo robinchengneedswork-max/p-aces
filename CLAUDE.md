@@ -144,4 +144,14 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     main thread (GPU delegate), so the game drew at only 16-21 fps. Fix = run MediaPipe in a Web
     Worker (send `createImageBitmap(video)` frames), so rendering stays at 60 fps; testable
     headless with Edge's fake camera (`--use-fake-device-for-media-stream`).
-- Next: user flies; offer the worker move.
+- **Round 10 (2026-10-18): "game runs one way and then the look is separate".**
+  - **Tracking in a module worker** (`tracker-worker.js`): MediaPipe's module wasm loader
+    (`forVisionTasks(path, true)` + `vision_wasm_module_internal.*`), one ImageBitmap in flight at a
+    time; main-thread path kept as fallback. Measured in real time via the DevTools protocol with
+    Edge's fake camera: worker 60 fps / 1.6 ms JS per frame vs fallback 41 fps / 24 ms. (Fake camera
+    has no hands, so detection is the cheap palm-only path; real hands cost ~2x.)
+  - **Anime look (`T`)**: presentation only. main.js keeps sim/input/sound every frame and draws on
+    a 24 fps cadence (events queued between pictures so explosions aren't skipped; measured 60 fps
+    sim / 24.0 drawn); lit materials swap to MeshToonMaterial (3-band gradient), inverted-hull ink on
+    plane/drones/ring/clouds (instanced ink twin), random-per-picture speed lines in the HUD.
+- Next: user flies with the worker; tries T.

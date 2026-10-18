@@ -16,6 +16,7 @@ const HAND_BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 
 
 function drawHud(ctx, W, H, st) {
   ctx.clearRect(0, 0, W, H);
+  if (st.settings.anime && !st.game.plane.crashed) drawSpeedLines(ctx, W, H, st);
   const g = st.game, p = g.plane, w = st.world;
   ctx.lineWidth = 1.5;
   ctx.font = '14px ' + HUD.font;
@@ -120,6 +121,30 @@ function drawRecorder(ctx, W, H, st) {
   ctx.fillStyle = st.assigned.fly ? HUD.green : HUD.red;
   ctx.font = 'bold 14px ' + HUD.font;
   ctx.fillText(st.assigned.fly ? 'hand tracked' : 'HAND NOT SEEN', W / 2, by + 40);
+}
+
+// Anime speed lines: streaks from the screen edge toward the middle, more and brighter with speed
+// and hard pulls. Redrawn at random every picture, so they shimmer like hand-drawn ones.
+function drawSpeedLines(ctx, W, H, st) {
+  const p = st.game.plane;
+  const fast = clamp((p.speed - CONFIG.SPEED_MAX * 0.7) / (CONFIG.SPEED_MAX * 0.55), 0, 1);
+  const k = Math.max(fast, (st.world.vapor || 0) * 0.8);
+  if (k <= 0.02) return;
+  const cx = W / 2, cy = H / 2, R = Math.hypot(W, H) / 2;
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  const n = Math.round(14 + 46 * k);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r0 = R * (0.62 - 0.22 * k + Math.random() * 0.12), r1 = R * (1.0 + Math.random() * 0.1);
+    ctx.globalAlpha = (0.12 + 0.35 * k) * (0.4 + Math.random() * 0.6);
+    ctx.lineWidth = 1 + Math.random() * 2.5 * k;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function bigText(ctx, W, H, text, color, sub) {

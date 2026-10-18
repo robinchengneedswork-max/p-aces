@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, assistOn, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -51,7 +51,11 @@ function rot(p, pitch, roll) {
 // A hand at image position (cx, cy), with orientation in degrees.
 function hand(o = {}) {
   const pitch = (o.pitch ?? -70) * DEG, roll = (o.roll || 0) * DEG;
-  const pts = handLocal(o).map(p => rot(p, pitch, roll));
+  // lean: the whole hand tipped about the screen's horizontal axis (+ = top away from the
+  // camera), the way a fist on a stick moves when the stick is pulled back.
+  const ln = (o.lean || 0) * DEG;
+  const leanP = ([x, y, z]) => [x, y * Math.cos(ln) + z * Math.sin(ln), -y * Math.sin(ln) + z * Math.cos(ln)];
+  const pts = handLocal(o).map(p => leanP(rot(p, pitch, roll)));
   const imgScale = 0.12 / 0.095 * (o.size || 1);  // palm length → 0.12 image units (size: nearer = bigger)
   const cx = o.cx ?? 0.5, cy = o.cy ?? 0.55;
   const jitter = () => (o.jitter ? (rnd() - 0.5) * o.jitter : 0);
@@ -125,30 +129,38 @@ console.log('flat-hand scheme');
 
 console.log('stick scheme');
 {
-  // Gripping a stick seen from the front: knuckle line near vertical (88°), right where the
-  // ±90° fold wraps. Calibrated on the centre grip, as the start-up countdown does.
+  // Gripping a stick seen from the front: knuckle line near vertical (88°). Calibrated on the
+  // centre grip, as the start-up countdown does. lean = stick tipped toward/away from camera,
+  // roll = tipped sideways on screen.
   const GRIP = 88;
   const fist = o => hand({ fist: true, pitch: 0, cy: 0.6, ...o, roll: GRIP + (o.roll || 0) });
   const s = settings({ scheme: 'stick' });
   X.calibrateNeutral(s, [fist({})]);
   check('fist at centre = no input', (() => { const c = drive([fist({})], 30, s); return c.out.roll === 0 && c.out.pitch === 0; })());
-  check('fist slid right → roll right', drive([fist({ cx: 0.62 })], 30, s).out.roll > 0.3);
-  const tilt = drive([fist({ roll: 6 })], 30, s);
-  check('fist tilted 6° right past vertical → roll right, not a 170° jump', tilt.out.roll > 0 && tilt.out.roll < 0.4, tilt.out.roll.toFixed(2));
-  check('fist tilted 25° right (no slide) → strong roll right', drive([fist({ roll: 25 })], 30, s).out.roll > 0.5);
-  check('fist tilted left → roll left', drive([fist({ roll: -25 })], 30, s).out.roll < -0.5);
-  const pivot = drive([fist({ cx: 0.6, roll: 15 })], 30, s);
-  check('pivoting stick (slide + tilt) → full roll, no yaw', pivot.out.roll === 1 && pivot.out.yaw === 0, pivot.out.roll.toFixed(2) + ' / ' + pivot.out.yaw.toFixed(2));
-  check('fist moved up (pull back) → nose up', drive([fist({ cy: 0.48 })], 30, s).out.pitch > 0.3);
-  check('fist moved down (push) → nose down', drive([fist({ cy: 0.72 })], 30, s).out.pitch < -0.3);
-  const push = drive([fist({ size: 1.22 })], 30, s);
-  check('fist pushed toward the camera (22% bigger, same height) → nose down', push.out.pitch < -0.4, push.out.pitch.toFixed(2));
-  const pull = drive([fist({ size: 0.82 })], 30, s);
-  check('fist pulled back (18% smaller) → nose up', pull.out.pitch > 0.4, pull.out.pitch.toFixed(2));
-  check('pulling back AND up → full nose up', drive([fist({ size: 0.85, cy: 0.54 })], 30, s).out.pitch === 1);
-  check('pull does not leak into roll', drive([fist({ size: 0.82 })], 30, s).out.roll === 0);
-  const rud = drive([fist({ roll: 25 })], 30, { ...s, twistRudder: true });
-  check('twist rudder on → tilt is yaw, not roll', rud.out.yaw > 0.3 && rud.out.roll === 0);
+  const ax = X.measureHand(fist({})).axW;
+  check('ring axis of an upright grip points up the stick', ax.y < -0.95, 'axis ' + ax.x.toFixed(2) + ',' + ax.y.toFixed(2) + ',' + ax.z.toFixed(2));
+  // Leaning a stick pinned at its base slides the fist sideways and tips it: both happen.
+  const right = o => fist({ cx: 0.5 + 0.06, roll: 15, ...o });
+  const r15 = drive([right({})], 30, s);
+  const slide = 0.06 / 0.12 / s.stickThrow;
+  check('stick leaned right (fist slides ½ palm) → roll right', r15.out.roll > 0.3 && Math.abs(r15.raw.roll - slide) < 0.03, r15.raw.roll.toFixed(2) + ' (expect ' + slide.toFixed(2) + ')');
+  check('stick leaned left → roll left', drive([fist({ cx: 0.44, roll: -15 })], 30, s).out.roll < -0.3);
+  const pull = drive([fist({ lean: 20 })], 30, s);
+  check('stick pulled back 20° → nose up', pull.out.pitch > 0.4, pull.raw.pitch.toFixed(2));
+  check('stick pushed forward 20° → nose down', drive([fist({ lean: -20 })], 30, s).out.pitch < -0.4);
+  check('half the pull reads about half', Math.abs(drive([fist({ lean: 10 })], 30, s).raw.pitch / pull.raw.pitch - 0.5) < 0.1);
+  check('a pull does not leak into roll', Math.abs(pull.raw.roll) < 0.05, pull.raw.roll.toFixed(3));
+  check('a roll does not leak into pitch', Math.abs(r15.raw.pitch) < 0.05, r15.raw.pitch.toFixed(3));
+  const both = drive([right({ lean: 20 })], 30, s);
+  check('pull + roll together read as both', both.out.roll > 0.3 && both.out.pitch > 0.4, both.raw.roll.toFixed(2) + ' / ' + both.raw.pitch.toFixed(2));
+  // Pitch is an angle now: sitting closer or raising the fist doesn't move it.
+  const moved = drive([fist({ cy: 0.5, size: 1.25 })], 30, s);
+  check('sitting closer / raising the fist (no lean) does not steer', moved.out.roll === 0 && moved.out.pitch === 0,
+    moved.raw.roll.toFixed(3) + ' / ' + moved.raw.pitch.toFixed(3));
+  const pushTilt = drive([fist({ lean: -25, roll: -15 })], 30, s);
+  check('a push that also tips the stick sideways does not roll (the slide is what rolls)', pushTilt.out.roll === 0 && pushTilt.out.pitch < -0.4,
+    pushTilt.raw.roll.toFixed(2) + ' / ' + pushTilt.raw.pitch.toFixed(2));
+  check('an old (pre-ring-axis) stick calibration counts as uncalibrated', !X.isCalibrated(settings({ scheme: 'stick', neutral: { stick: { cx: 0.5, cy: 0.6, scale: 0.12, roll: 0, pitch: 0 } } })));
   const c = drive([fist({ cx: 0.96 })], 5, s);
   check('fist near the frame edge raises the edge warning', c.edge);
   check('stick defaults to rate roll (hold over = keep rolling); flat to assist',
@@ -162,7 +174,7 @@ console.log('stick scheme');
 
 console.log('two hands');
 {
-  const s = settings();
+  const s = settings({ scheme: 'flat' });
   const fly = hand({ cx: 0.7, roll: 25 }), thr = hand({ cx: 0.3, left: true, cy: 0.3 });
   const a = X.assignHands([thr, fly], s);
   check('right hand (screen right) flies', a.fly === fly && a.thr === thr);
@@ -207,20 +219,12 @@ console.log('from the first recordings');
   X.controlsUpdate(solo, [fist({ cx: 0.3 })], 0, s);
   check('one hand from the start flies, wherever it is', solo.assigned.fly !== null);
 
-  // Rolling a pivoting stick shrinks the fist (it swings away from the camera).
-  const sNoMute = s;
-  const rolled = fist({ cx: 0.88, roll: 15, size: 0.85 });
-  const muted = drive([rolled], 30, s).raw.pitch;
-  const depthOnly = -Math.log(0.85) / s.stickDepth;
-  check('rolled fist that looks smaller: depth mostly muted, little false nose-up', muted < depthOnly * 0.5, muted.toFixed(2) + ' vs unmuted ' + depthOnly.toFixed(2));
-  check('a straight pull (no roll) keeps its full depth', drive([fist({ size: 0.85 })], 30, sNoMute).raw.pitch > depthOnly * 0.95);
-
   // Centre drifted: hand held still, but reads as steering.
   const cs = X.createControls();
-  for (let i = 0; i < 120; i++) X.controlsUpdate(cs, [fist({ size: 0.86 })], i / 30, s);
+  for (let i = 0; i < 120; i++) X.controlsUpdate(cs, [fist({ lean: 15 })], i / 30, s);
   check('still hand that keeps steering → "press C to re-centre" hint', cs.offCentre);
   const cm = X.createControls();
-  for (let i = 0; i < 120; i++) X.controlsUpdate(cm, [fist({ size: 0.86, cx: 0.78 + 0.1 * Math.sin(i / 6) })], i / 30, s);
+  for (let i = 0; i < 120; i++) X.controlsUpdate(cm, [fist({ lean: 15, cx: 0.78 + 0.1 * Math.sin(i / 6) })], i / 30, s);
   check('…but not while the hand is actually moving', !cm.offCentre);
   const cn = X.createControls();
   for (let i = 0; i < 120; i++) X.controlsUpdate(cn, [fist({})], i / 30, s);
@@ -228,6 +232,28 @@ console.log('from the first recordings');
 
   check('calibrating at 78% across warns about room to roll', X.neutralRoom({ cx: 0.78, cy: 0.6 }) !== '');
   check('calibrating mid-frame does not', X.neutralRoom({ cx: 0.5, cy: 0.55 }) === '');
+}
+
+console.log('left-hand rudder');
+{
+  const s = settings({ scheme: 'stick' });
+  const stick = hand({ fist: true, pitch: 0, cy: 0.6, cx: 0.72, roll: 88 });
+  // The throttle hand rests at its own angle (12°); calibration takes it as "no rudder".
+  const left = o => hand({ left: true, cx: 0.28, cy: 0.55, ...o, roll: 12 + (o.roll || 0) });
+  X.calibrateNeutral(s, [left({}), stick]);
+  check('calibration records the rudder hand resting angle', s.neutral.thr && Math.abs(s.neutral.thr.roll - X.measureHand(left({})).roll) < 1e-9);
+  check('left hand at rest = no rudder', drive([left({}), stick], 30, s).out.yaw === 0);
+  const right = drive([left({ roll: 20 }), stick], 30, s);
+  check('turn the left hand clockwise 20° → right rudder', right.out.yaw > 0.4, right.raw.yaw.toFixed(2));
+  check('anticlockwise → left rudder', drive([left({ roll: -20 }), stick], 30, s).out.yaw < -0.4);
+  check('raising the left hand (throttle) does not steer', drive([left({ cy: 0.3 }), stick], 30, s).out.yaw === 0);
+  check('pinching (guns) does not steer', drive([left({ pinch: true }), stick], 30, s).out.yaw === 0);
+  check('fist (missile) does not steer', drive([left({ fist: true }), stick], 30, s).out.yaw === 0);
+  check('rudder does not touch roll or pitch', right.out.roll === 0 && right.out.pitch === 0);
+  check('Y off → no rudder from the hand', drive([left({ roll: 20 }), stick], 30, { ...s, thrRudder: false }).out.yaw === 0);
+  const gone = drive([left({ roll: 20 }), stick], 30, s);
+  for (let i = 0; i < 30; i++) X.controlsUpdate(gone, [stick], 1 + i / 30, s);
+  check('left hand leaves view → rudder returns to centre', gone.out.yaw === 0);
 }
 
 console.log('hand lost');
@@ -307,13 +333,13 @@ console.log('gesture recorder');
   // What a player does for each asked-for motion (during 'ready' they return to centre).
   const POSE = {
     neutral: () => fist({}),
-    pull: () => fist({ size: 0.82, cy: 0.56 }),
-    push: () => fist({ size: 1.22, cy: 0.65 }),
-    'roll-left': () => fist({ roll: -20, cx: 0.46 }),
-    'roll-right': () => fist({ roll: 20, cx: 0.54 }),
-    'half-pull': () => fist({ size: 0.91, cy: 0.58 }),
-    'pull-right': () => fist({ size: 0.84, cy: 0.57, roll: 18, cx: 0.53 }),
-    circle: i => fist({ cx: 0.5 + 0.04 * Math.cos(i / 8), size: 1 + 0.12 * Math.sin(i / 8) }),
+    pull: () => fist({ lean: 25, size: 0.82, cy: 0.56 }),
+    push: () => fist({ lean: -25, size: 1.22, cy: 0.65 }),
+    'roll-left': () => fist({ roll: -20, cx: 0.44 }),
+    'roll-right': () => fist({ roll: 20, cx: 0.56 }),
+    'half-pull': () => fist({ lean: 12, size: 0.91, cy: 0.58 }),
+    'pull-right': () => fist({ lean: 22, size: 0.84, cy: 0.57, roll: 18, cx: 0.55 }),
+    circle: i => fist({ roll: 15 * Math.cos(i / 8), lean: 15 * Math.sin(i / 8) }),
   };
   const rec = X.createRecorder(10);
   const c = X.createControls();

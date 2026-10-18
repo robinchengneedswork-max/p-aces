@@ -9,8 +9,8 @@ MediaPipe hand + face tracking, three.js, no build step.
 - **Keyboard only:** add `?keys` to the URL.
 
 ## Controls
-- **Flying hand:** tilt or slide the fist to roll, pull back / push forward to pitch. `1` flat-hand mode, `2` stick.
-- **Other hand:** height = throttle, pinch = guns, close the fist = missile.
+- **Flying hand (stick):** grip a stick (a chopstick pressed on the table works). Pull back / push forward to pitch — read from the angle of the line through your curled fingers (the stick's axis), so sitting closer doesn't steer. Lean it sideways to roll. `1` flat-hand mode, `2` stick.
+- **Other hand:** height = throttle, pinch = guns, close the fist = missile, turn it like a dial = rudder (`Y` toggles).
 - **Head:** turn a little to look around (`L` toggles).
 - `C` calibrate · `X` assist/expert · `V` cockpit/chase · `D` tuning panel · `G` record gestures · `R` reset
 - Keyboard: arrows fly, W/S throttle, Space guns, F missile.

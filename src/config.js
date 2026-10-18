@@ -53,7 +53,7 @@ const CONFIG = {
   STICK_LOST_HOLD: 0.6,      // a fist at an odd angle drops out more; hold it longer
   EDGE_MARGIN: 0.08,
   ROOM_MARGIN: 0.25,         // calibration warns if the stick centre is closer than this to an edge
-  DEPTH_ROLL_MUTE: 0.7,      // full roll mutes the stick's depth (push/pull) term by this much
+  STICK_IMAGE_PITCH: 0.5,    // the image-landmark stick axis leans ~half as far as the 3D one
   STILL_TIME: 3,             // hand still this long (s)…
   STILL_MOVE: 0.15,          // …(moved less than this many palm lengths)…
   OFF_CENTRE: 0.35,          // …but still steering this hard = suggest re-centring         // warn when the flying hand's palm centre is this close to a frame edge
@@ -73,21 +73,22 @@ const CONFIG = {
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
-    version: 4,
+    version: 6,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
     assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: rate (keep rolling)
     pitchSrc: 'tilt',        // flat scheme: 'tilt' the palm, or raise/lower the 'height'
     invertPitch: false,
     rollRange: 35,           // degrees of hand tilt for full roll
     pitchRange: 30,          // degrees of palm tilt for full pitch
-    stickThrow: 1.2,         // palm lengths of fist travel for full deflection
-    stickDepth: 0.25,        // stick: fist size change (log) for full pitch; 0.25 ≈ 28% bigger/smaller
+    stickThrow: 0.9,         // palm lengths of fist travel for full deflection (stick roll, flat 'height' pitch)
+    stickPitch: 30,          // stick: degrees of lean toward/away from the camera for full pitch
+    thrRudder: true,         // turning the throttle hand like a dial = rudder (yaw)
+    yawRange: 30,            // degrees of throttle-hand turn for full rudder
     deadzone: 0.12,
     expo: 1.4,
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
     beta: 0.6,
     renderScale: 1,          // pixels per CSS pixel; lower = faster on a laptop GPU
-    twistRudder: false,
     headLook: true,          // turn your head to look around (face tracking)
     headGain: 11,            // radians of view per unit of nose offset (face widths)
     headDeadzone: 0.045,
@@ -98,8 +99,9 @@ const CONFIG = {
   SLIDERS: [
     { key: 'rollRange', label: 'Roll: tilt for full (°)', min: 10, max: 70, step: 1 },
     { key: 'pitchRange', label: 'Pitch: tilt for full (°)', min: 10, max: 70, step: 1 },
-    { key: 'stickThrow', label: 'Stick throw (palms)', min: 0.3, max: 3, step: 0.05 },
-    { key: 'stickDepth', label: 'Stick push/pull depth', min: 0.08, max: 0.8, step: 0.01 },
+    { key: 'stickThrow', label: 'Stick: slide for full roll (palms)', min: 0.3, max: 3, step: 0.05 },
+    { key: 'stickPitch', label: 'Stick: lean for full pitch (°)', min: 8, max: 60, step: 1 },
+    { key: 'yawRange', label: 'Rudder: left-hand turn for full (°)', min: 10, max: 60, step: 1 },
     { key: 'deadzone', label: 'Deadzone', min: 0, max: 0.4, step: 0.01 },
     { key: 'expo', label: 'Expo (1 = linear)', min: 1, max: 3, step: 0.05 },
     { key: 'minCutoff', label: 'Smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },
@@ -116,7 +118,7 @@ const CONFIG = {
 // flat: palm down, fingers pointing at the screen (palm tilt ≈ -70°). stick: fist mid-frame.
 const DEFAULT_NEUTRAL = {
   flat: { roll: 0, pitch: -70 * DEG, cx: 0.5, cy: 0.55, scale: 0.12 },
-  stick: { roll: 0, pitch: 0, cx: 0.5, cy: 0.6, scale: 0.12 },
+  stick: { roll: 0, pitch: 0, cx: 0.5, cy: 0.6, scale: 0.12, axI: { x: 0, y: -1, z: 0 }, axW: { x: 0, y: -1, z: 0 } },
 };
 
 // MediaPipe hand landmark indices

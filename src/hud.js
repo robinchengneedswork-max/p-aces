@@ -357,9 +357,14 @@ function drawCamView(ctx, W, H, st) {
   ctx.fillStyle = HUD.ink;
   const lines = [st.status];
   const f = st.ctrl.flyM, t = st.ctrl.thrM;
+  if (f && st.settings.scheme === 'stick') {
+    const n = neutralFor(st.settings), li = stickLean(f.axI, n.axI), lw = stickLean(f.axW, n.axW);
+    lines.push('stick: slide ' + ((f.cx - n.cx) / (n.scale || f.scale)).toFixed(2) + ' palms · axis lean side ' + (li.side / DEG).toFixed(0) + '°  fwd ' + (lw.fwd / DEG).toFixed(0) + '° (3D) / ' + (li.fwd / DEG).toFixed(0) + '° (image)');
+  }
   if (f) lines.push('fly: knuckles ' + (f.roll / DEG).toFixed(0) + '° palm tilt ' + (f.pitch / DEG).toFixed(0) + '° size x' + (f.scale / (neutralFor(st.settings).scale || f.scale)).toFixed(2) + ' open ' + f.open.toFixed(2));
   if (st.head.m) lines.push('head: yaw ' + st.head.m.yaw.toFixed(3) + ' pitch ' + st.head.m.pitch.toFixed(3)
     + (st.settings.headNeutral ? '' : st.head.auto && st.head.auto.n >= CONFIG.HEAD_AUTO_FRAMES ? ' (auto-centred)' : ' (centring…)'));
+  if (t) lines.push('rudder hand angle ' + ((t.roll - ((st.settings.neutral && st.settings.neutral.thr) ? st.settings.neutral.thr.roll : 0)) / DEG).toFixed(0) + '°');
   if (t) lines.push('thr: y ' + t.cy.toFixed(2) + ' pinch ' + t.pinch.toFixed(2) + ' open ' + t.open.toFixed(2));
   lines.forEach((l, i) => ctx.fillText(l, x0, y0 - 12 - (lines.length - 1 - i) * 14));
 }

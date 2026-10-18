@@ -99,4 +99,20 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     transfer between sessions (rms 0.72-0.77), so no personal fitted mapping.
   - Hand tracking ran at 15-19 Hz: face detection now runs every other frame; recordings log
     detect/face ms and render fps.
-- Next: user re-records after these fixes (stick hand mid-frame) to compare.
+- **Round 6 (2026-10-18): ring-axis stick** — the user's idea ("concentric circles of the
+  closed fist"): the four curled fingers are rings round the stick, so the line through their
+  centres (`ringAxis`, power iteration on the 3x3 covariance) is the stick's axis.
+  - Validated on 4 real recordings before shipping (replay through the game's own
+    `controlsUpdate`, rms vs asked-for motion, after deadzone/expo): mid-frame recordings
+    0.48 / 0.38 vs old mapping 0.85 / 0.80 (the old one read pulls as pushes, rolls as dives).
+  - **Pitch** = axis lean toward/away from camera, average of 3D world (÷ stickPitch 30°) and
+    image (÷ 15°, swings ~half as far). Angle-based: sitting closer / raising the fist don't steer.
+  - **Roll** = fist slide, ÷ stickThrow 0.9 palms. The analyzer's leak score showed slide leaks
+    5-8% into pull/push vs up to 76% for the axis's own sideways lean (pushes tip it sideways).
+  - Old size/height pitch, depth mute and twist-rudder are gone. Pre-ring-axis stick
+    calibrations count as uncalibrated (`isCalibrated`); settings v6.
+  - **Left-hand rudder**: the throttle hand turned like a dial (knuckle line vs its calibrated
+    rest, ÷ yawRange 30°); C records its rest; `Y` toggles. Height/pinch/fist don't move it.
+  - Analyzer: `side`, `fwd3d`, `fwdImg` stick-axis features, and signals ranked by separation
+    discounted by **leak** into the other axis (separation alone ranked leaky height/aim first).
+- Next: user flies the ring-axis stick + left-hand rudder; re-record with G if anything's off.

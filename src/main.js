@@ -40,7 +40,9 @@ function loadSettings() {
       s.headSmooth = Math.min(s.headSmooth, CONFIG.DEFAULTS.headSmooth);
       s.headGain = Math.max(s.headGain, CONFIG.DEFAULTS.headGain);   // the wider deadzone eats some turn
     }
-    s.version = 4;
+    // v6: stick roll is the fist's slide again, tuned on recordings to 0.9 palm lengths.
+    if ((saved.version || 1) < 6) s.stickThrow = CONFIG.DEFAULTS.stickThrow;
+    s.version = 6;
   }
   return s;
 }
@@ -148,7 +150,7 @@ function keyboardStep(dt) {
 function statusLine() {
   const T = window.Tracker;
   return (T.delegate || '?') + ' ' + Math.round(T.fps) + ' fps · ' + hands.length + ' hand' + (hands.length === 1 ? '' : 's')
-    + ' · flying hand ' + settings.hand + ' · ' + (settings.neutral && settings.neutral[settings.scheme] ? 'calibrated' : 'NOT calibrated');
+    + ' · flying hand ' + settings.hand + ' · ' + (isCalibrated(settings) ? 'calibrated' : 'NOT calibrated');
 }
 
 function frame(ts) {
@@ -226,7 +228,7 @@ function frame(ts) {
   if (camera && !assigned.fly && !kbActive) warn = 'SHOW YOUR FLYING HAND';
   else if (camera && controls.edge) warn = 'HAND AT EDGE OF CAMERA — bring it toward the middle';
   else if (camera && controls.offCentre && !kbActive) warn = 'Hand is still but the plane is still steering — press C to re-centre';
-  else if (camera && !(settings.neutral && settings.neutral[settings.scheme])) warn = 'Press C to calibrate';
+  else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
   drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
     throttle: ctrl.throttle, gun: ctrl.gun, missileFlash,
@@ -318,7 +320,7 @@ async function start(useCamera) {
   resize();
   showScreen(null);
   document.body.classList.toggle('debug', debug);
-  if (useCamera && !(settings.neutral && settings.neutral[settings.scheme])) startCalibration();
+  if (useCamera && !isCalibrated(settings)) startCalibration();
   requestAnimationFrame(frame);
 }
 
@@ -354,10 +356,10 @@ window.addEventListener('keydown', e => {
   }
   if (e.code === 'KeyP') toggle('pitchSrc', 'tilt', 'height', v => 'PITCH FROM PALM ' + (v === 'tilt' ? 'TILT' : 'HEIGHT'));
   if (e.code === 'KeyL') toggle('headLook', true, false, v => (v ? 'HEAD LOOK ON' : 'HEAD LOOK OFF'));
-  if (e.code === 'KeyT') toggle('twistRudder', false, true, v => (v ? 'STICK TWIST = RUDDER' : 'STICK TWIST OFF (Q/E rudder)'));
+  if (e.code === 'KeyY') toggle('thrRudder', false, true, v => (v ? 'RUDDER: turn your left hand like a dial' : 'RUDDER: Q/E keys only'));
   if (e.code === 'KeyI') toggle('invertPitch', false, true, v => (v ? 'PITCH INVERTED' : 'PITCH NORMAL'));
   if (e.code === 'KeyH') toggle('hand', 'right', 'left', v => 'FLYING HAND: ' + v.toUpperCase());
-  if ((e.code === 'Digit1' || e.code === 'Digit2') && mode === 'camera' && !(settings.neutral && settings.neutral[settings.scheme])) startCalibration();
+  if ((e.code === 'Digit1' || e.code === 'Digit2') && mode === 'camera' && !isCalibrated(settings)) startCalibration();
 });
 window.addEventListener('keyup', e => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());

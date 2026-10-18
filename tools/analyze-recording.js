@@ -3,6 +3,11 @@
 // Run: node tools/analyze-recording.js [file | latest]     (default: latest in recordings/)
 //
 // Features (flying hand, relative to the 'neutral' step):
+//   side      stick axis (line through the finger-ring centres) leaning sideways on screen, deg
+//             — the game's stick ROLL
+//   fwd3d     stick axis leaning toward/away from the camera, 3D world landmarks, deg (+ = pulled)
+//   fwdImg    same from the image landmarks (swings ~half as far) — the game's stick PITCH
+//             averages fwd3d/stickPitch and fwdImg/(stickPitch/2)
 //   knuckles  knuckle-line angle on screen, deg (+ = clockwise)      — stick roll (tilt) today
 //   tilt      wrist→middle-knuckle elevation out of the screen, deg (3D, + = knuckles away from
 //             camera). Unaffected by roll, unlike the game's flat-hand pitch reading, which flips
@@ -32,6 +37,24 @@ function wrap(a) {
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 
+// Stick axis: line through the four finger-ring centres (what the game's stick scheme reads),
+// unit vector oriented pinky → index. Mirrors ringAxis() in src/hands.js.
+function ringAxis(P) {
+  const rings = [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]
+    .map(f => [0, 1, 2].map(k => mean(f.map(i => P[i][k]))));
+  const c = [0, 1, 2].map(k => mean(rings.map(r => r[k])));
+  const q = rings.map(r => r.map((x, k) => x - c[k]));
+  const C = [0, 1, 2].map(i => [0, 1, 2].map(j => q.reduce((s, p) => s + p[i] * p[j], 0)));
+  const nrm = v => { const l = Math.hypot(...v) || 1; return v.map(x => x / l); };
+  const seed = rings[0].map((x, k) => x - rings[3][k]);
+  let v = nrm(seed);
+  for (let it = 0; it < 20; it++) v = nrm([0, 1, 2].map(i => C[i][0] * v[0] + C[i][1] * v[1] + C[i][2] * v[2]));
+  return v[0] * seed[0] + v[1] * seed[1] + v[2] * seed[2] < 0 ? v.map(x => -x) : v;
+}
+const leanSide = (d, d0) => wrap(Math.atan2(d[0], -d[1]) - Math.atan2(d0[0], -d0[1]));
+const leanFwd = (d, d0) => wrap(Math.atan2(d[2], Math.hypot(d[0], d[1])) - Math.atan2(d0[2], Math.hypot(d0[0], d0[1])));
+const ANGLES = new Set(['side', 'fwd3d', 'fwdImg', 'knuckles', 'tilt', 'aim']);
+
 // Per-frame raw features that need no reference.
 function rawFeatures(f) {
   const m = f.fly.m, L = f.fly.lm;
@@ -42,6 +65,7 @@ function rawFeatures(f) {
     roll: m.roll, pitch: Math.atan2(fz, Math.hypot(fx, fy)), cx: m.cx, cy: m.cy, scale: m.scale, open: m.open,
     aim: Math.atan2(K[1] - W[1], K[0] - W[0]),
     zk: (K[2] - W[2]) / (m.scale || 1),
+    axI: ringAxis(f.fly.lm), axW: ringAxis(f.fly.w),
   };
 }
 
@@ -63,7 +87,13 @@ function analyze(rec) {
     cx: mean(nRaw.map(r => r.cx)), cy: mean(nRaw.map(r => r.cy)),
     scale: mean(nRaw.map(r => r.scale)), zk: mean(nRaw.map(r => r.zk)), open: mean(nRaw.map(r => r.open)),
   };
+  const meanAxis = k => { const v = [0, 1, 2].map(i => mean(nRaw.map(r => r[k][i]))); const l = Math.hypot(...v) || 1; return v.map(x => x / l); };
+  N.axI = meanAxis('axI');
+  N.axW = meanAxis('axW');
   const rel = r => ({
+    side: leanSide(r.axI, N.axI) * DEGS,
+    fwd3d: leanFwd(r.axW, N.axW) * DEGS,
+    fwdImg: leanFwd(r.axI, N.axI) * DEGS,
     knuckles: foldHalf(r.roll - N.roll) * DEGS,
     tilt: wrap(r.pitch - N.pitch) * DEGS,
     dx: (r.cx - N.cx) / N.scale,
@@ -73,10 +103,10 @@ function analyze(rec) {
     zk: r.zk - N.zk,
     open: r.open,
   });
-  const FEATS = ['knuckles', 'tilt', 'dx', 'dy', 'depth', 'aim', 'zk', 'open'];
+  const FEATS = ['side', 'fwd3d', 'fwdImg', 'knuckles', 'tilt', 'dx', 'dy', 'depth', 'aim', 'zk', 'open'];
   const noise = {};
   const nRel = nRaw.map(rel);
-  for (const k of FEATS) noise[k] = Math.max(sd(nRel.map(r => r[k])), k === 'knuckles' || k === 'tilt' || k === 'aim' ? 0.5 : 0.005);
+  for (const k of FEATS) noise[k] = Math.max(sd(nRel.map(r => r[k])), ANGLES.has(k) ? 0.5 : 0.005);
 
   const steps = rec.meta.steps.map(s => s.id);
   const rows = [];
@@ -123,7 +153,7 @@ function report(rec, a) {
   out.push(head);
   for (const r of a.rows) {
     const cells = a.FEATS.filter(k => k !== 'open').map(k => {
-      const d = k === 'knuckles' || k === 'tilt' || k === 'aim' ? 1 : 3;
+      const d = ANGLES.has(k) ? 1 : 3;
       return (fmt(r.mean[k], d) + '(' + Math.round(r.z[k]) + ')').padStart(13);
     }).join('');
     out.push(r.id.padEnd(12) + (Math.round(r.tracked * 100) + '%').padStart(6) + ' ' + cells
@@ -133,14 +163,22 @@ function report(rec, a) {
   out.push('');
   // Which measurement best separates each pair of opposite motions?
   const by = id => a.rows.find(r => r.id === id);
-  const pairs = [['pitch', 'pull', 'push'], ['roll', 'roll-right', 'roll-left']];
-  for (const [axis, plus, minus] of pairs) {
+  // Separation alone misleads: a signal can split pull from push and ALSO swing during rolls
+  // (fist height does). leak = its biggest move during the other axis's steps, as a share of its
+  // half-separation. Ranked by separation, discounted by leak.
+  const pairs = [['pitch', 'pull', 'push', ['roll-left', 'roll-right']], ['roll', 'roll-right', 'roll-left', ['pull', 'push']]];
+  for (const [axis, plus, minus, others] of pairs) {
     const p = by(plus), m = by(minus);
     if (!p || !m) continue;
-    const ranked = a.FEATS.filter(k => k !== 'open').map(k => ({ k, sep: (p.mean[k] - m.mean[k]) / a.noise[k] }))
-      .sort((x, y) => Math.abs(y.sep) - Math.abs(x.sep));
-    out.push(axis.toUpperCase() + ' — best signals separating ' + plus + ' from ' + minus + ' (noise units, sign = direction for ' + plus + '):');
-    out.push('  ' + ranked.slice(0, 4).map(r => r.k + ' ' + fmt(r.sep, 0)).join(',  '));
+    const ranked = a.FEATS.filter(k => k !== 'open').map(k => {
+      const sep = (p.mean[k] - m.mean[k]) / a.noise[k];
+      const half = Math.abs(p.mean[k] - m.mean[k]) / 2 || 1e-9;
+      const leak = Math.max(...others.map(by).filter(Boolean).map(r => Math.abs(r.mean[k]))) / half;
+      return { k, sep, leak, score: Math.abs(sep) / (1 + 2 * leak) };
+    }).sort((x, y) => y.score - x.score);
+    out.push(axis.toUpperCase() + ' — signals separating ' + plus + ' from ' + minus + ' (noise units, sign = direction for ' + plus
+      + '; leak = how much it also moves on ' + others.join('/') + '):');
+    out.push('  ' + ranked.slice(0, 6).map(r => r.k + ' ' + fmt(r.sep, 0) + ' (leak ' + Math.round(r.leak * 100) + '%)').join(',  '));
   }
   const half = by('half-pull'), full = by('pull');
   if (half && full) {
@@ -148,7 +186,7 @@ function report(rec, a) {
       + ', dy ' + half.mean.dy.toFixed(3) + ' vs ' + full.mean.dy.toFixed(3) + ' (proportional = good for analog control)');
   }
   const circle = by('circle');
-  if (circle) out.push('CIRCLE ranges: ' + a.FEATS.filter(k => k !== 'open').map(k => k + ' ' + circle.range[k].toFixed(k === 'knuckles' || k === 'tilt' || k === 'aim' ? 1 : 3)).join(', '));
+  if (circle) out.push('CIRCLE ranges: ' + a.FEATS.filter(k => k !== 'open').map(k => k + ' ' + circle.range[k].toFixed(ANGLES.has(k) ? 1 : 3)).join(', '));
   return out.join('\n');
 }
 

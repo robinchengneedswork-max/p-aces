@@ -53,7 +53,7 @@ function handSample(h) {
   if (!h) return null;
   const m = measureHand(h);
   const mm = {};
-  for (const k of Object.keys(m)) mm[k] = r4(m[k]);
+  for (const k of Object.keys(m)) if (typeof m[k] === 'number') mm[k] = r4(m[k]);
   return {
     m: mm,
     lm: h.lm.map(p => [r4(p.x), r4(p.y), r4(p.z)]),
@@ -83,14 +83,17 @@ function neutralFromRecording(rec) {
   const hold = rec.frames.filter(f => f.step === 'neutral' && f.phase === 'hold' && f.fly);
   if (hold.length < 5) return null;
   const t0 = hold[0].t;
-  const fs = hold.filter(f => f.t - t0 >= 0.5).map(f => f.fly.m);
+  // Re-measured from the saved landmarks, so the stick axes come back too.
+  const pt = ([x, y, z]) => ({ x, y, z });
+  const fs = hold.filter(f => f.t - t0 >= 0.5).map(f => measureHand({ lm: f.fly.lm.map(pt), world: f.fly.w.map(pt) }));
   if (fs.length < 5) return null;
   const avg = k => fs.reduce((a, m) => a + m[k], 0) / fs.length;
+  const avgAxis = k => vNorm(fs.reduce((a, m) => vAdd(a, m[k]), v3(0, 0, 0)));
   const r0 = fs[0].roll, p0 = fs[0].pitch;
   return {
     roll: r0 + fs.reduce((a, m) => a + foldHalf(m.roll - r0), 0) / fs.length,
     pitch: p0 + fs.reduce((a, m) => a + wrapAngle(m.pitch - p0), 0) / fs.length,
-    cx: avg('cx'), cy: avg('cy'), scale: avg('scale'),
+    cx: avg('cx'), cy: avg('cy'), scale: avg('scale'), axI: avgAxis('axI'), axW: avgAxis('axW'),
   };
 }
 
@@ -101,8 +104,9 @@ function recorderResult(rec, s, meta) {
       scheme: s.scheme,
       hand: s.hand,
       neutral: neutralFor(s),
-      settings: { stickThrow: s.stickThrow, stickDepth: s.stickDepth, rollRange: s.rollRange, pitchRange: s.pitchRange,
-        deadzone: s.deadzone, expo: s.expo, twistRudder: s.twistRudder, invertPitch: s.invertPitch },
+      settings: { stickPitch: s.stickPitch, stickThrow: s.stickThrow, rollRange: s.rollRange,
+        pitchRange: s.pitchRange, deadzone: s.deadzone, expo: s.expo, invertPitch: s.invertPitch,
+        thrRudder: s.thrRudder, yawRange: s.yawRange, thrNeutral: s.neutral && s.neutral.thr },
       steps: RECORD_STEPS.map(st => ({ id: st.id, say: st.say })),
       ready: RECORD_READY,
       hold: RECORD_HOLD,

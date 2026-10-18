@@ -4,11 +4,15 @@
 //
 // Flying hand, 'flat' scheme: roll = tilt of the knuckle line on screen; pitch = palm tipping
 // toward/away from the camera (from the 3D world landmarks), or hand height if pitchSrc='height'.
-// Flying hand, 'stick' scheme: a pivoting stick seen from the front. Roll = fist tilting (the
-// knuckle line rotating) plus sliding sideways; pitch = fist height plus depth (a fist pushed
-// toward the camera looks bigger). Pull/push is mostly depth with a front camera, so height alone
-// read pulls weakly and made you shove the fist out of the bottom of the frame.
-// Other hand: height = throttle, pinch thumb+index = gun, close the fist = missile.
+// Flying hand, 'stick' scheme: a fist round a stick is a stack of finger rings, and the line
+// through the ring centres is the stick's axis (the user's idea). Pitch = that axis leaning
+// toward/away from the camera: an angle, so sitting closer doesn't steer. Roll = the fist sliding
+// sideways (a stick pinned at its base slides the fist as it leans); on the recordings that leaked
+// least into pitch (5-8%), less than the axis's own sideways lean (up to 76%, pushes tilt it).
+// Together: rms error 0.31-0.46 on the mid-frame recordings vs 0.80-0.85 for the old
+// slide + height + fist-size mapping, which read pulls as pushes and rolls as dives.
+// Other hand: height = throttle, pinch thumb+index = gun, close the fist = missile, and turning
+// it like a dial (knuckle line clockwise on screen) = right rudder.
 
 function oneEuroAlpha(dt, cutoff) {
   const tau = 1 / (2 * Math.PI * cutoff);
@@ -27,6 +31,37 @@ function oneEuroStep(f, x, t, minCutoff, beta) {
   f.dx += oneEuroAlpha(dt, 1.0) * (dx - f.dx);
   f.x += oneEuroAlpha(dt, minCutoff + beta * Math.abs(f.dx)) * (x - f.x);
   return f.x;
+}
+
+const RING_FINGERS = [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]];
+
+// Line through the centres of the four finger rings (each finger's 4 joints averaged), as a unit
+// vector oriented pinky → index. Principal axis by power iteration on the 3x3 covariance.
+function ringAxis(pts) {
+  const rings = RING_FINGERS.map(f => {
+    let x = 0, y = 0, z = 0;
+    for (const i of f) { x += pts[i].x; y += pts[i].y; z += pts[i].z; }
+    return v3(x / 4, y / 4, z / 4);
+  });
+  let c = v3(0, 0, 0);
+  for (const r of rings) c = vAdd(c, vScale(r, 1 / rings.length));
+  const q = rings.map(r => vSub(r, c));
+  const C = (a, b) => q.reduce((s, p) => s + p[a] * p[b], 0);
+  const M = [['x', 'y', 'z'].map(b => C('x', b)), ['x', 'y', 'z'].map(b => C('y', b)), ['x', 'y', 'z'].map(b => C('z', b))];
+  const seed = vSub(rings[0], rings[3]);
+  let v = vNorm(seed);
+  for (let it = 0; it < 20; it++) v = vNorm(v3(M[0][0] * v.x + M[0][1] * v.y + M[0][2] * v.z, M[1][0] * v.x + M[1][1] * v.y + M[1][2] * v.z, M[2][0] * v.x + M[2][1] * v.y + M[2][2] * v.z));
+  return vDot(v, seed) < 0 ? vScale(v, -1) : v;
+}
+
+// How axis d leans relative to the neutral axis d0, radians: side = in the screen plane
+// (+ = top toward screen right), fwd = out of it (+ = top away from the camera = pulled back).
+function stickLean(d, d0) {
+  const w = a => Math.atan2(Math.sin(a), Math.cos(a));
+  return {
+    side: w(Math.atan2(d.x, -d.y) - Math.atan2(d0.x, -d0.y)),
+    fwd: w(Math.atan2(d.z, Math.hypot(d.x, d.y)) - Math.atan2(d0.z, Math.hypot(d0.x, d0.y))),
+  };
 }
 
 // Raw geometry of one hand. Everything here is independent of which hand it is.
@@ -57,7 +92,8 @@ function measureHand(h) {
   for (const i of [HL.INDEX_TIP, HL.MIDDLE_TIP, HL.RING_TIP, HL.PINKY_TIP]) reach += vDist(W[i], W[HL.WRIST]);
   const open = reach / 4 / palmLen;
   const pinch = vDist(W[HL.THUMB_TIP], W[HL.INDEX_TIP]) / palmLen;
-  return { roll, pitch, cx, cy, scale, open, pinch };
+  // Stick axis from the image landmarks (best for roll) and the 3D world ones (bigger push/pull).
+  return { roll, pitch, cx, cy, scale, open, pinch, axI: ringAxis(L), axW: ringAxis(W) };
 }
 
 // Two hands: split by screen side. One hand: once both roles have been seen, whichever role it
@@ -119,8 +155,13 @@ function shapeAxis(v, s) {
   return Math.sign(v) * Math.pow(n, s.expo);
 }
 
+function isCalibrated(s) {
+  const n = s.neutral && s.neutral[s.scheme];
+  return !!n && (s.scheme !== 'stick' || !!n.axI);   // pre-ring-axis stick calibrations don't count
+}
+
 function neutralFor(s) {
-  return (s.neutral && s.neutral[s.scheme]) || DEFAULT_NEUTRAL[s.scheme];
+  return isCalibrated(s) ? s.neutral[s.scheme] : DEFAULT_NEUTRAL[s.scheme];
 }
 
 function controlsUpdate(c, hands, t, s) {
@@ -138,20 +179,13 @@ function controlsUpdate(c, hands, t, s) {
   if (c.flyM) {
     const m = c.flyM;
     const scale = n.scale || m.scale;
-    let roll, pitch, yaw = 0;
+    let roll, pitch;
     if (s.scheme === 'stick') {
-      const tilt = foldHalf(m.roll - n.roll) / (s.rollRange * DEG);
+      const li = stickLean(m.axI, n.axI), lw = stickLean(m.axW, n.axW);
       roll = (m.cx - n.cx) / scale / s.stickThrow;
-      // Tilting the fist is how most people roll an imaginary stick. With twistRudder on it's
-      // rudder instead (and leaks into rolls, since a pivoting stick tilts the fist as it goes over).
-      if (s.twistRudder) yaw = tilt;
-      else roll += tilt;
-      // Rolling swings the fist round the stick's pivot, away from the camera, so it looks
-      // smaller: read as a pull. Recordings showed rolls reading up to +1.2 nose-up; muting the
-      // depth term while rolled cut that by half to two-thirds.
-      const mute = 1 - CONFIG.DEPTH_ROLL_MUTE * Math.min(1, Math.abs(roll));
-      const depth = -Math.log(m.scale / scale) / s.stickDepth * mute;   // + = smaller = pulled back
-      pitch = -(m.cy - n.cy) / scale / s.stickThrow + depth;
+      // Push/pull: the 3D and image estimates averaged (the most consistent across recordings).
+      // The image one swings about half as far, so its full scale is halved.
+      pitch = (lw.fwd / (s.stickPitch * DEG) + li.fwd / (s.stickPitch * CONFIG.STICK_IMAGE_PITCH * DEG)) / 2;
     } else {
       roll = foldHalf(m.roll - n.roll) / (s.rollRange * DEG);
       pitch = s.pitchSrc === 'height'
@@ -161,7 +195,6 @@ function controlsUpdate(c, hands, t, s) {
     if (s.invertPitch) pitch = -pitch;
     c.raw.roll = oneEuroStep(c.f.roll, roll, t, s.minCutoff, s.beta);
     c.raw.pitch = oneEuroStep(c.f.pitch, pitch, t, s.minCutoff, s.beta);
-    c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
     c.flySeen = t;
     // Still hand that's still steering = the centre has drifted (sat closer, moved the stick).
     const moved = c.still && Math.hypot(m.cx - c.still.cx, m.cy - c.still.cy) / scale > CONFIG.STILL_MOVE;
@@ -174,12 +207,20 @@ function controlsUpdate(c, hands, t, s) {
     const k = Math.exp(-CONFIG.HAND_LOST_DECAY * dt);
     c.raw.roll *= k;
     c.raw.pitch *= k;
-    c.raw.yaw *= k;
-    c.f = { roll: createOneEuro(), pitch: createOneEuro(), yaw: createOneEuro() };
+    c.f = { roll: createOneEuro(), pitch: createOneEuro(), yaw: c.f.yaw };
   }
 
   c.out.roll = shapeAxis(c.raw.roll, s);
   c.out.pitch = shapeAxis(c.raw.pitch, s);
+
+  if (c.thrM && s.thrRudder) {
+    const nr = (s.neutral && s.neutral.thr) ? s.neutral.thr.roll : 0;
+    const yaw = foldHalf(c.thrM.roll - nr) / (s.yawRange * DEG);
+    c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
+  } else {
+    c.raw.yaw *= Math.exp(-CONFIG.HAND_LOST_DECAY * 2 * dt);
+    c.f.yaw = createOneEuro();
+  }
   c.out.yaw = shapeAxis(c.raw.yaw, s);
 
   if (c.thrM) {
@@ -211,10 +252,12 @@ function neutralRoom(n) {
 }
 
 function calibrateNeutral(s, hands) {
-  const { fly } = assignHands(hands, s);
+  const { fly, thr } = assignHands(hands, s);
   if (!fly) return false;
   const m = measureHand(fly);
   s.neutral = { ...(s.neutral || {}) };
-  s.neutral[s.scheme] = { roll: m.roll, pitch: m.pitch, cx: m.cx, cy: m.cy, scale: m.scale };
+  // The rudder hand's resting angle, if it's in view (shared by both schemes).
+  if (thr) s.neutral.thr = { roll: measureHand(thr).roll };
+  s.neutral[s.scheme] = { roll: m.roll, pitch: m.pitch, cx: m.cx, cy: m.cy, scale: m.scale, axI: m.axI, axW: m.axW };
   return true;
 }

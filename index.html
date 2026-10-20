@@ -11,10 +11,45 @@
 <canvas id="gl"></canvas>
 <canvas id="hud"></canvas>
 
-<div id="panel">
-  <div class="panel-title">Tuning <small>(saved)</small></div>
-</div>
-<div id="keys">1 flat hand · 2 stick · C / clap twice calibrate · M rate/assist · P pitch tilt/height · I invert · Y left-hand rudder · T anime look · L head look · G record gestures · H swap hand · V view · D debug · B dogfight/range · N bomber · K plane · U minimal HUD · R reset</div>
+<!-- Keys and tuning, one collapsible menu (D hides it, with the camera view). -->
+<details id="menu">
+  <summary>☰ Keys &amp; settings</summary>
+  <div class="menu-body">
+    <details class="menu-sec" open>
+      <summary>Keys</summary>
+      <dl class="keylist">
+        <dt>Arrows</dt><dd>fly (down = pull up)</dd>
+        <dt>W / S</dt><dd>throttle</dd>
+        <dt>Q / E</dt><dd>rudder</dd>
+        <dt>Space</dt><dd>guns (pinch)</dd>
+        <dt>Shift</dt><dd>all guns + cannon, WW2 (fist)</dd>
+        <dt>F</dt><dd>missile, jet (fist)</dd>
+        <dt>C</dt><dd>calibrate (or clap twice)</dd>
+        <dt>1 / 2</dt><dd>flat hand / flight stick</dd>
+        <dt>M</dt><dd>rate / assist</dd>
+        <dt>P</dt><dd>pitch from tilt / height</dd>
+        <dt>I</dt><dd>invert pitch</dd>
+        <dt>Y</dt><dd>left-hand rudder</dd>
+        <dt>H</dt><dd>swap hands</dd>
+        <dt>V</dt><dd>chase / cockpit view</dd>
+        <dt>U</dt><dd>minimal HUD</dd>
+        <dt>T</dt><dd>anime look</dd>
+        <dt>L</dt><dd>head look</dd>
+        <dt>B</dt><dd>dogfight / test range</dd>
+        <dt>N</dt><dd>spawn a bomber</dd>
+        <dt>K</dt><dd>change plane</dd>
+        <dt>R</dt><dd>reset / new mission</dd>
+        <dt>G</dt><dd>record gestures</dd>
+        <dt>D</dt><dd>hide this menu + camera view</dd>
+        <dt>Enter</dt><dd>ready / rematch (duel)</dd>
+      </dl>
+    </details>
+    <details class="menu-sec">
+      <summary>Tuning <small>(saved)</small></summary>
+      <div id="panel"></div>
+    </details>
+  </div>
+</details>
 
 <div id="screen-start" class="screen active">
   <div class="card">

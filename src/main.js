@@ -470,6 +470,14 @@ function resize() {
 
 function buildPanel() {
   const panel = document.getElementById('panel');
+  // The Keys & settings menu: remember which parts were left open. A clicked summary or slider keeps
+  // focus, and then Space (guns) / the arrows (flying) would toggle or slide it: let go of focus.
+  document.querySelectorAll('#menu, #menu details').forEach((d, i) => {
+    const key = 'sky-ace-menu-' + i;
+    try { const v = localStorage.getItem(key); if (v !== null) d.open = v === '1'; } catch (e) { /* private window */ }
+    d.addEventListener('toggle', () => { try { localStorage.setItem(key, d.open ? '1' : '0'); } catch (e) { /* private window */ } });
+  });
+  document.getElementById('menu').addEventListener('pointerup', () => setTimeout(() => document.activeElement && document.activeElement.blur(), 0));
   for (const sl of CONFIG.SLIDERS) {
     const row = document.createElement('label');
     row.className = 'slider-row';

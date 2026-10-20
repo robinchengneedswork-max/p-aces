@@ -14,15 +14,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; col
 button { font: inherit; font-weight: 600; padding: 12px 20px; border-radius: 8px; border: 0; background: #8dffb0; color: #0b0d12; cursor: pointer; }
 button.ghost { background: transparent; color: #e8ecf3; border: 1px solid #2a3140; }
 
-#panel, #keys { display: none; position: fixed; z-index: 5; background: rgba(11,13,18,0.8); border: 1px solid #2a3140; border-radius: 8px; font-size: 13px; }
-body.debug #panel, body.debug #keys { display: block; }
-#panel { top: 70px; right: 16px; width: 240px; padding: 12px; }
-.panel-title { font-weight: 700; margin-bottom: 8px; }
-.panel-title small { color: #7d8799; font-weight: 400; }
+#menu { display: none; position: fixed; z-index: 5; top: 16px; right: 16px; max-width: calc(100vw - 32px); background: rgba(11,13,18,0.85); border: 1px solid #2a3140; border-radius: 8px; font-size: 13px; color: #c4cbd8; }
+body.debug #menu { display: block; }
+#menu > summary { padding: 6px 12px; cursor: pointer; font-weight: 700; color: #e8ecf3; user-select: none; }
+#menu[open] > summary { border-bottom: 1px solid #2a3140; }
+.menu-body { width: 260px; max-width: 100%; max-height: calc(100vh - 80px); overflow-y: auto; padding: 4px 12px 10px; }
+.menu-sec > summary { cursor: pointer; font-weight: 700; padding: 6px 0; color: #e8ecf3; user-select: none; }
+.menu-sec > summary small { color: #7d8799; font-weight: 400; }
+.keylist { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 2px 0 8px; }
+.keylist dt { color: #ffd34a; font-weight: 700; white-space: nowrap; }
+.keylist dd { margin: 0; }
+#panel { padding-top: 4px; }
 .slider-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 8px; color: #c4cbd8; }
 .slider-row b { color: #ffd34a; }
 .slider-row input { grid-column: 1 / -1; width: 100%; }
-#keys { top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 12px; color: #7d8799; white-space: nowrap; }
 
 .duel-box { margin-top: 24px; padding-top: 16px; border-top: 1px solid #2a3140; }
 .duel-fields { display: flex; gap: 8px; flex-wrap: wrap; }

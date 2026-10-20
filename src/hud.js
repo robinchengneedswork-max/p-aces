@@ -107,14 +107,7 @@ function drawHud(ctx, W, H, st) {
     ctx.fillText(st.warn, W / 2, H * 0.72);
   }
 
-  if (st.debug && st.camera) drawCamView(ctx, W, H, st);
-  else {
-    ctx.textAlign = 'left';
-    ctx.font = '12px ' + HUD.font;
-    ctx.fillStyle = HUD.dim;
-    if (g.solo) ctx.fillText('R new mission · B test range · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate', 20, H - 20);
-    else ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · N bomber · K plane (' + p.spec.name + ') · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
-  }
+  if (st.debug && st.camera) drawCamView(ctx, W, H, st);   // (the keys live in the Keys & settings menu)
 }
 
 // A little arc at the top: where the view is pointing relative to the nose.

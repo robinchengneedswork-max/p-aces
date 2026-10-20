@@ -380,25 +380,25 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     across the screen when rounds pass the camera); escorts started beside the formation, off screen.
 - **Round 24 (2026-10-20): solo bomber escort + hidden WW2 gun assist.** User: "the bomber game as a single
   player option"; then "more auto aim for human pilots — the camera controls aren't the tightest".
-  -  (, ): mode 'escort' on one laptop; this game flies the
+  - `raid.js` (`createRaid(seed, role)`, `g.solo`): mode 'escort' on one laptop; this game flies the
     formation, AI pilots fly the other side. Start screen **Mode** picker (range / dogfight / solo escort
-    as 109 / as P-51); R = new mission, K and N off. Fly the 109: 3 lives vs  AI P-51s
-    (a regular + 2 rookies) that hold slots by the formation until you're within  3.5 km,
-    then hunt you. Fly escort:  6 AI 109s, 3 at a time, diving in from 5 km out / 2 km up;
+    as 109 / as P-51); R = new mission, K and N off. Fly the 109: 3 lives vs `RAID_ESCORTS` AI P-51s
+    (a regular + 2 rookies) that hold slots by the formation until you're within `RAID_ENGAGE` 3.5 km,
+    then hunt you. Fly escort: `RAID_109S` 6 AI 109s, 3 at a time, diving in from 5 km out / 2 km up;
     they turn on you for 8 s when you get on their tail. Gunners shoot at whoever flies the 109
-    (); their rounds hit AI 109s at  0.5; AI 109 rounds hit bombers
-    ( = no score for you). Same win rules as LAN.  split out of
-    . Formation now flies  100 m/s (LAN too; lone bombers still 130).
-  - AI vs bombers ( in ): slashing passes (break at 150 m / after 4 s in range /
+    (`g.gunTargets`); their rounds hit AI 109s at `RAID_GUNNER_VS_AI` 0.5; AI 109 rounds hit bombers
+    (`hitBomber(…, 'ai')` = no score for you). Same win rules as LAN. `flyBandit` split out of
+    `updateBandits`. Formation now flies `FORMATION_SPEED` 100 m/s (LAN too; lone bombers still 130).
+  - AI vs bombers (`target.bomber` in `pilotStep`): slashing passes (break at 150 m / after 4 s in range /
     once the pass is lost, dive away 4 s, come round), full throttle, 1.5× gun range, aim error × 0.4,
     cannon on any close shot, moving-frame shot solution, and LOS-rate feed-forward. Found by sim:
     the 109s sat in a tail chase at bomber speed and the tail gunners killed all 6; diving passes missed
-    25 m low because  pushed (weak) while inverted — now it rolls upright unless within 2°
+    25 m low because `steerTo` pushed (weak) while inverted — now it rolls upright unless within 2°
     (applies to dogfight AI too; dogfight.js still 17/17); a P-only steer lagged the swinging LOS 2-3°.
     Measured (scratch sims): undefended, AI 109s win 3/4 missions in 200-270 s; an AI-flown player 109
     beats the escorts 4/4 with 1 life left.
-  - **Hidden gun assist for WW2**:  runs for WW2 too (spec gun speed, skips friends via
-    ) but the marker isn't drawn; within gun-assist slider ×  1.5 (5.25° at
-    default) and  600 m the guns converge on the solution ( aim). Cue: the
+  - **Hidden gun assist for WW2**: `gunSolution` runs for WW2 too (spec gun speed, skips friends via
+    `escortFriend`) but the marker isn't drawn; within gun-assist slider × `ASSIST_SCALE` 1.5 (5.25° at
+    default) and `GUN_ASSIST_RANGE` 600 m the guns converge on the solution (`fireGuns` aim). Cue: the
     reflector's centre dot swells green. Works in duels/escort too (shooter-decided hits).
   - Not yet flown by the user.

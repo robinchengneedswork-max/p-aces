@@ -837,6 +837,181 @@ function updateCamera(w, p, dt, look) {
   cam.lookAt(pos.clone().addScaledVector(fwd, 90));
 }
 
+// ---- Hangar (hangar.js) ---------------------------------------------------------------------
+// Its own little scene: a round-roofed hangar, doors open onto a runway, your plane on a test
+// stand facing out. Built the first time it's shown.
+function makeHangar() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(SKY);
+  scene.fog = new THREE.Fog(SKY, 200, 1500);
+  const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.3, 3000);
+  scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a4436, 0.6));
+  const sun = new THREE.DirectionalLight(0xfff3dd, 0.35);
+  sun.position.set(0.3, 1, -0.8);
+  scene.add(sun);
+  const mat = (c, side) => new THREE.MeshPhongMaterial({ color: c, flatShading: true, side: side || THREE.FrontSide });
+  const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); scene.add(o); return o; };
+  const R = 30, D = 56;   // roof radius (= half the width, and the height), depth (doors at -z)
+  // Outside: grass, and a runway out of the doors.
+  const grass = add(new THREE.PlaneGeometry(4000, 4000), mat(0x5d7a3e), 0, -0.05, 0);
+  grass.geometry.rotateX(-Math.PI / 2);
+  const runway = add(new THREE.PlaneGeometry(30, 1600), mat(0x55585c), 0, -0.02, -D / 2 - 800);
+  runway.geometry.rotateX(-Math.PI / 2);
+  for (let z = -D / 2 - 30; z > -D / 2 - 1500; z -= 40) {
+    const dash = add(new THREE.PlaneGeometry(1, 14), new THREE.MeshBasicMaterial({ color: 0xd8d8d0 }), 0, 0, z);
+    dash.geometry.rotateX(-Math.PI / 2);
+  }
+  // Inside: concrete floor, painted lines round the stand.
+  const floor = add(new THREE.PlaneGeometry(R * 2, D), mat(0x7a7d80), 0, 0, 0);
+  floor.geometry.rotateX(-Math.PI / 2);
+  const paint = new THREE.MeshBasicMaterial({ color: 0xe0b830 });
+  for (const [x, z, w, d] of [[0, -D / 2 + 1, 40, 0.4], [-14, 0, 0.4, 30], [14, 0, 0.4, 30], [0, 15, 28.4, 0.4], [0, -15, 28.4, 0.4]]) {
+    const l = add(new THREE.PlaneGeometry(w, d), paint, x, 0.02, z);
+    l.geometry.rotateX(-Math.PI / 2);
+  }
+  // Curved corrugated roof (a half cylinder along z), the back wall, and the front with its doorway.
+  const roofG = new THREE.CylinderGeometry(R, R, D, 28, 1, true, Math.PI / 2, Math.PI);
+  roofG.rotateX(Math.PI / 2);
+  add(roofG, mat(0x6b737c, THREE.DoubleSide), 0, 0, 0);
+  for (let i = 1; i < 7; i++) {   // ribs
+    const rib = new THREE.TorusGeometry(R - 0.3, 0.25, 4, 28, Math.PI);
+    add(rib, mat(0x4a5058), 0, 0, -D / 2 + i * D / 7);
+  }
+  add(new THREE.CircleGeometry(R, 28, 0, Math.PI), mat(0x5d646c, THREE.DoubleSide), 0, 0, D / 2);
+  const front = new THREE.Shape();
+  front.absarc(0, 0, R, 0, Math.PI, false);
+  front.lineTo(R, 0);
+  const door = new THREE.Path();
+  door.moveTo(-21, 0); door.lineTo(21, 0); door.lineTo(21, 17); door.lineTo(-21, 17); door.lineTo(-21, 0);
+  front.holes.push(door);
+  add(new THREE.ShapeGeometry(front, 24), mat(0x5d646c, THREE.DoubleSide), 0, 0, -D / 2);
+  // The doors, slid open to the sides.
+  for (const x of [-25.5, 25.5]) add(new THREE.BoxGeometry(9, 17, 0.4), mat(0x7a5a3a), x, 8.5, -D / 2 - 0.5);
+  // Clutter: crates, drums, a workbench, a ladder.
+  const wood = mat(0x7a5c3a), drum = mat(0x8a3a2a), steel = mat(0x4b4f55);
+  for (const [x, z, s] of [[-22, 18, 2.2], [-22, 15.5, 2.2], [-22, 16.8, 1.6], [21, -14, 1.8], [23, -12, 1.4]]) add(new THREE.BoxGeometry(s, s, s), wood, x, s / 2 + (s === 1.6 ? 2.2 : 0), z);
+  for (const [x, z] of [[20, 18], [21.3, 18.6], [20.6, 20], [-19, -18]]) add(new THREE.CylinderGeometry(0.6, 0.6, 1.8, 10), drum, x, 0.9, z);
+  add(new THREE.BoxGeometry(6, 1, 2), wood, 24, 2, 4);
+  for (const x of [21.4, 26.6]) add(new THREE.BoxGeometry(0.2, 2, 1.8), steel, x, 1, 4);
+  // Lamps hanging from the roof, with their light.
+  for (const z of [-14, 4, 20]) {
+    add(new THREE.CylinderGeometry(0.05, 0.05, 6, 4), steel, 0, R - 3, z);
+    add(new THREE.ConeGeometry(1.4, 1, 10, 1, true), mat(0x2e3238, THREE.DoubleSide), 0, R - 6.5, z);
+    add(new THREE.SphereGeometry(0.4, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff1c8 }), 0, R - 7, z);
+    const lamp = new THREE.PointLight(0xffe3b0, 0.4, 60, 1.5);
+    lamp.position.set(0, R - 7.5, z);
+    scene.add(lamp);
+  }
+  // The test stand: a post and a cradle.
+  const stand = new THREE.Group();
+  stand.add(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 1, 10), steel));
+  stand.add(new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 0.3, 16), steel));
+  stand.children[0].position.y = 1;
+  stand.children[1].position.y = 0.15;
+  scene.add(stand);
+  // Tracers out of the doors when you fire (a small pool).
+  const tracerM = new THREE.MeshBasicMaterial({ color: 0xffe08a });
+  const tracers = [];
+  for (let i = 0; i < 40; i++) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 5), tracerM);
+    t.visible = false;
+    t.userData = { age: 9, vel: new THREE.Vector3() };
+    scene.add(t);
+    tracers.push(t);
+  }
+  const flash = new THREE.PointLight(0xffc060, 0, 25, 2);
+  scene.add(flash);
+  return { scene, camera, stand, tracers, flash, model: null, type: null, guns: null, nextTracer: 0, built: false };
+}
+
+// The hangar's model: your fighter, or (crewing a turret) the bomber with its top guns.
+function setHangarModel(w, Hg, type) {
+  if (Hg.type === type) return;
+  if (Hg.model) Hg.scene.remove(Hg.model);
+  Hg.type = type;
+  Hg.guns = null;
+  if (type === 'bomber') {
+    Hg.model = makeBomberModel();
+    const top = CONFIG.BOMBER_GUNNERS[CONFIG.CREW_TURRET];
+    const guns = new THREE.Group();
+    guns.rotation.order = 'YXZ';
+    guns.position.set(top.x, top.y + 0.5, top.z);
+    const dark = new THREE.MeshPhongMaterial({ color: 0x2a2d30, flatShading: true });
+    for (const x of [-0.3, 0.3]) {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.4, 6), dark);
+      barrel.geometry.rotateX(Math.PI / 2);
+      barrel.position.set(x, 0, -1.3);
+      guns.add(barrel);
+    }
+    Hg.model.add(guns);
+    Hg.guns = guns;
+  } else Hg.model = makeAircraft(type);
+  Hg.model.rotation.order = 'YXZ';
+  styleNew(w, Hg.model);
+  Hg.scene.add(Hg.model);
+}
+
+// h = the hangar state (hangar.js); type = plane type or 'bomber'; look = head look (orbits the camera).
+function renderHangar(w, h, type, dt, now, look) {
+  if (!w.hangar) { w.hangar = makeHangar(); styleNew(w, w.hangar.scene); }
+  const Hg = w.hangar, cam = Hg.camera;
+  setHangarModel(w, Hg, type);
+  const big = type === 'bomber';
+  const lift = big ? 3.2 : 2.6;
+  const m = Hg.model;
+  m.position.set(0, lift, big ? -2 : 0);
+  m.rotation.set(big ? 0 : h.rig.pitch, big ? 0 : -h.rig.yaw, big ? 0 : -h.rig.roll);
+  Hg.stand.position.set(0, 0, m.position.z);
+  Hg.stand.children[0].scale.y = lift - 0.5;   // (the post stops under the belly)
+  Hg.stand.children[0].position.y = (lift - 0.5) / 2;
+  if (m.userData.prop) m.userData.prop.rotation.z = h.prop;
+  if (m.userData.flame) m.userData.flame.scale.set(1, 1, 0.3 + h.throttle * 1.2);
+  if (m.userData.props) m.userData.props.forEach((p, i) => { p.rotation.z = h.prop + i; });
+  if (Hg.guns) { Hg.guns.rotation.y = -h.gun.az; Hg.guns.rotation.x = h.gun.el; }
+  m.updateMatrixWorld(true);
+  // Where the rounds come from, and which way they go.
+  let muzzle, dir;
+  if (Hg.guns) {
+    Hg.guns.updateMatrixWorld(true);
+    muzzle = new THREE.Vector3(0, 0, -2.6).applyMatrix4(Hg.guns.matrixWorld);
+    dir = new THREE.Vector3(0, 0, -1).transformDirection(Hg.guns.matrixWorld);
+  } else {
+    muzzle = new THREE.Vector3(0, 0, -(m.userData.len || 15) / 2 - 1).applyMatrix4(m.matrixWorld);
+    dir = new THREE.Vector3(0, 0, -1).transformDirection(m.matrixWorld);
+  }
+  for (const e of h.events) {
+    if (e.type !== 'gun' && e.type !== 'cannon') continue;
+    const t = Hg.tracers[Hg.nextTracer++ % Hg.tracers.length];
+    t.userData.age = 0;
+    t.userData.vel.copy(dir).multiplyScalar(400);
+    t.position.copy(muzzle);
+    t.lookAt(muzzle.clone().add(dir));
+    t.visible = true;
+  }
+  for (const t of Hg.tracers) {
+    if (!t.visible) continue;
+    t.userData.age += dt;
+    t.position.addScaledVector(t.userData.vel, dt);
+    if (t.userData.age > 1.5) t.visible = false;
+  }
+  Hg.flash.position.copy(muzzle);
+  Hg.flash.intensity = h.firing ? 1 + Math.random() * 1.5 : 0;
+  // Camera: behind and to the right, a little above; turning your head walks it round the plane.
+  const target = new THREE.Vector3(0, lift + (big ? 2 : 0.6), m.position.z);
+  const dist = big ? 30 : 8 + (m.userData.len || 15) * 1.2;
+  const az = 25 * DEG + Math.sin(now * 0.2) * 3 * DEG + (look ? look.yaw * 1.6 : 0);
+  const el = clamp((big ? 25 : 13) * DEG + (look ? look.pitch * 1.2 : 0), 2 * DEG, 60 * DEG);
+  cam.position.set(target.x + Math.sin(az) * Math.cos(el) * dist, target.y + Math.sin(el) * dist, target.z + Math.cos(az) * Math.cos(el) * dist);
+  // (Kept inside the hangar's walls and under its roof.)
+  cam.position.x = clamp(cam.position.x, -26, 26);
+  cam.position.z = clamp(cam.position.z, -40, 26);
+  cam.position.y = Math.max(0.8, Math.min(cam.position.y, Math.sqrt(Math.max(0, 27 * 27 - cam.position.x * cam.position.x))));
+  cam.lookAt(target);
+  if (cam.aspect !== w.camera.aspect) { cam.aspect = w.camera.aspect; cam.updateProjectionMatrix(); }
+  w.renderer.clear();
+  w.renderer.render(Hg.scene, cam);
+}
+
 // ---- Anime look -----------------------------------------------------------------------------
 // Purely how things are drawn (T). Lit materials swap to 3-band toon shading, ink outlines appear
 // (inverted hull: a slightly bigger back-face copy in ink), and main.js draws on a 24 fps cadence
@@ -888,6 +1063,7 @@ function setAnime(w, on) {
   w.grad = w.grad || toonGradient();
   w.scene.traverse(o => styleMesh(o, on, w.grad));
   w.cockpit.scene.traverse(o => styleMesh(o, on, w.grad));
+  if (w.hangar) w.hangar.scene.traverse(o => styleMesh(o, on, w.grad));
   w.clouds.ink.visible = on;
 }
 

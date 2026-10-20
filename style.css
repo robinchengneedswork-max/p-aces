@@ -15,7 +15,10 @@ button { font: inherit; font-weight: 600; padding: 12px 20px; border-radius: 8px
 button.ghost { background: transparent; color: #e8ecf3; border: 1px solid #2a3140; }
 
 #menu { display: none; position: fixed; z-index: 5; top: 16px; right: 16px; max-width: calc(100vw - 32px); background: rgba(11,13,18,0.85); border: 1px solid #2a3140; border-radius: 8px; font-size: 13px; color: #c4cbd8; }
-body.debug #menu { display: block; }
+body.debug #menu, body.hangar #menu { display: block; }
+#btn-takeoff { display: none; position: fixed; z-index: 4; left: 50%; bottom: 24px; transform: translateX(-50%); font-size: 18px; padding: 14px 28px; }
+body.hangar-solo #btn-takeoff { display: block; }
+body.hangar .menu-body { max-height: calc(100vh - 260px); }   /* (the input widget shows below it) */
 #menu > summary { padding: 6px 12px; cursor: pointer; font-weight: 700; color: #e8ecf3; user-select: none; }
 #menu[open] > summary { border-bottom: 1px solid #2a3140; }
 .menu-body { width: 260px; max-width: 100%; max-height: calc(100vh - 80px); overflow-y: auto; padding: 4px 12px 10px; }

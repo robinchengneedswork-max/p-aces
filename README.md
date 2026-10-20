@@ -17,6 +17,7 @@ Both laptops get this folder (`git clone` is best — a zipped copy on a Mac may
 - **Head:** turn a little to look around (`L` toggles).
 - `B` test range ↔ dogfight against AI bandits · `C` or clap twice to calibrate (centre, then sweep to your limits) · `M` rate/assist (stick defaults to rate: hold = keep rolling) · `V` cockpit/chase · `D` tuning panel · `T` anime look (24 fps, cel shading, ink, speed lines) · `G` record gestures · `R` reset
 - Keyboard: arrows fly, W/S throttle, Space guns, F missile.
+- **Hangar:** while you wait (duel/escort lobby, calibrating, the hand model loading) and before a solo take-off, your plane sits on a test stand that moves with your hands, with a setup checklist and the settings menu open. `Enter` takes off; `Esc` in solo flight goes back (paused).
 
 ## Development
 - `node test/headless.js` — synthetic hands/faces drive the real control, flight, game and duel code.

@@ -10,6 +10,7 @@
 <video id="cam" playsinline muted></video>
 <canvas id="gl"></canvas>
 <canvas id="hud"></canvas>
+<button id="btn-takeoff">Take off (Enter)</button>
 
 <!-- Keys and tuning, one collapsible menu (D hides it, with the camera view). -->
 <details id="menu">
@@ -41,7 +42,8 @@
         <dt>R</dt><dd>reset / new mission</dd>
         <dt>G</dt><dd>record gestures</dd>
         <dt>D</dt><dd>hide this menu + camera view</dd>
-        <dt>Enter</dt><dd>ready / rematch (duel)</dd>
+        <dt>Esc</dt><dd>back to the hangar (solo; pauses)</dd>
+        <dt>Enter</dt><dd>take off from the hangar; ready / rematch (duel)</dd>
         <dt>Turret</dt><dd>both fists = grab the gun (fists down = muzzle up), shake = fire; arrows swing it, Space fires; turn your head to swing it further</dd>
       </dl>
     </details>
@@ -130,6 +132,7 @@
 <script src="src/escort.js"></script>
 <script src="src/raid.js"></script>
 <script src="src/gunner.js"></script>
+<script src="src/hangar.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>

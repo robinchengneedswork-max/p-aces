@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js', 'raid.js', 'gunner.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, createRaid, raidForm, createGunnerInput, gunnerInputUpdate, raidRules, hitBomber, makeRng, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js', 'raid.js', 'gunner.js', 'hangar.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, createRaid, raidForm, createGunnerInput, gunnerInputUpdate, createHangar, hangarStep, hangarChecks, HANGAR_PHASES, raidRules, hitBomber, makeRng, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -1396,6 +1396,39 @@ console.log('game');
   g2.plane.pos.y = X.groundHeight(g2.plane.pos.x, g2.plane.pos.z) + 5;
   for (let i = 0; i < 60 * 3; i++) X.gameUpdate(g2, { roll: 0, pitch: i < 30 ? -1 : 0, yaw: 0, throttle: 0.5, assist: true }, 1 / 60);
   check('respawns level, well above the ground', !g2.plane.crashed && g2.plane.pos.y > X.groundHeight(g2.plane.pos.x, g2.plane.pos.z) + 400);
+}
+
+console.log('hangar');
+{
+  const DT = 1 / 60;
+  const h = X.createHangar();
+  const o = { look: null, grip: false };
+  const hold = (c, sec) => { for (let t = 0; t < sec; t += DT) X.hangarStep(h, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, ...c }, DT, o); };
+  const view = (extra = {}) => X.hangarChecks(h, { camera: true, tracking: true, fly: true, thr: true, calibrated: true, headLook: true, face: true, thrRudder: true, ...extra });
+  const ok = label => view().find(r => r.label.startsWith(label)).ok;
+  check('nothing tried yet: the flight rows are open', !ok('Roll') && !ok('Pull') && !ok('Throttle idle') && !ok('Guns'));
+  hold({ roll: 1 }, 1);
+  check('full right roll: the plane leans ' + Math.round(CONFIG.HANGAR_ROLL / DEG) + '° on its stand', near(h.rig.roll, CONFIG.HANGAR_ROLL, 0.01));
+  hold({ pitch: 1 }, 1);
+  check('…and pulling lifts the nose', near(h.rig.pitch, CONFIG.HANGAR_PITCH, 0.01) && Math.abs(h.rig.roll) < 0.01);
+  check('roll one way only: not ticked yet', !ok('Roll'));
+  hold({ roll: -1, pitch: -1 }, 0.5);
+  check('both ways: roll and pitch ticked, and they stay ticked', ok('Roll') && ok('Pull'));
+  hold({ throttle: 0 }, 0.2); hold({ throttle: 1 }, 0.2);
+  check('throttle idle and full ticked', ok('Throttle idle'));
+  let shots = 0;
+  for (let t = 0; t < 1; t += DT) { X.hangarStep(h, { gun: true, throttle: 1 }, DT, o); shots += h.events.filter(e => e.type === 'gun').length; }
+  check('the guns fire on the stand (' + CONFIG.HANGAR_SHOTS + ' a second, no ammo)', ok('Guns') && Math.abs(shots - CONFIG.HANGAR_SHOTS) <= 1, shots + ' shots');
+  check('live rows show what is seen right now', view({ fly: false }).find(r => r.label.startsWith('Flying')).ok === false && view().find(r => r.label.startsWith('Flying')).live);
+  check('keyboard: no camera rows', !X.hangarChecks(h, { camera: false }).some(r => r.live));
+  // A turret crew: the guns swing on the stand like the real turret, and grabbing + shaking ticks off.
+  const c = X.createHangar();
+  for (let i = 0; i < 30; i++) X.hangarStep(c, { gunAz: Math.PI / 2, gunEl: -1 }, DT, { crew: true, grip: true });
+  check('turret on the stand: swings at ' + CONFIG.CREW_SLEW + ' rad/s, never below ' + Math.round(CONFIG.CREW_EL_MIN / DEG) + '°', near(c.gun.az, CONFIG.CREW_SLEW * 0.5, 0.02) && c.gun.el >= CONFIG.CREW_EL_MIN - 1e-9, (c.gun.az / DEG).toFixed(1) + '° ' + (c.gun.el / DEG).toFixed(1) + '°');
+  X.hangarStep(c, { gun: true }, DT, { crew: true, grip: true });
+  const rows = X.hangarChecks(c, { camera: true, crew: true, tracking: true, hands: 2 });
+  check('crew checklist: hands, grab, shake (no flying rows)', rows.length === 4 && rows.every(r => r.ok) && !rows.some(r => r.label.startsWith('Roll')));
+  check('the hangar shows while waiting (lobby, calibrating, match over), not in a round', ['connecting', 'lobby', 'calib', 'over'].every(p => X.HANGAR_PHASES.includes(p)) && !X.HANGAR_PHASES.includes('fight') && !X.HANGAR_PHASES.includes('roundEnd'));
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

@@ -36,6 +36,9 @@ let shake = 0;                  // camera shake from hits, 0..1, decays
 let critT = 0;                  // time to the next DAMAGE CRITICAL beep
 let lockTickT = 0;
 let creakT = 0;                 // time to the next over-G creak
+let hang = createHangar();     // the hangar's test stand and checklist (hangar.js)
+let hangarSolo = false;        // flying solo: in the hangar (before take-off, or paused with Esc)
+let loading = null;            // text while the camera and hand model start (shown in the hangar)
 let duel = null;               // 1v1 LAN duel state (duel.js), or null
 let duelWs = null;             // its WebSocket to the host laptop
 let escortEvents = [];         // escort: game events from the server (kills, fires…) to replay this frame
@@ -93,6 +96,47 @@ function toHands(raw) {
   }));
 }
 
+// The hangar is up while you wait: a duel's lobby / calibration / result, or solo before take-off.
+function inHangar() {
+  return duel ? HANGAR_PHASES.includes(duel.phase) : hangarSolo || !!loading;
+}
+
+function soloTitle(g) {
+  if (g.crew) return 'TOP GUNNER';
+  if (g.solo) return g.team === 'attacker' ? 'BOMBER ESCORT: YOU FLY THE 109' : 'BOMBER ESCORT: YOU FLY A P-51';
+  return g.mode === 'dogfight' ? 'DOGFIGHT' : 'TEST RANGE';
+}
+
+// What the hangar's panel says, and its checklist.
+function hangarView() {
+  const camera = mode === 'camera', g = game;
+  const rows = hangarChecks(hang, {
+    camera, crew: !!g.crew, tracking: !!(window.Tracker && Tracker.ready), hands: hands.length,
+    fly: !!controls.assigned.fly, thr: !!controls.assigned.thr, calibrated: isCalibrated(settings),
+    headLook: settings.headLook, face: !!face, thrRudder: settings.thrRudder, ww2: g.plane.spec.ERA === 'ww2',
+  });
+  const v = { rows, crew: !!g.crew, title: soloTitle(g), sub: '', prompt: '' };
+  if (loading) { v.title = 'LOADING'; v.sub = loading; }
+  else if (duel) v.prompt = duel.phase === 'calib' && !duel.ready ? 'ENTER — READY' : '';
+  else v.sub = (g.crew ? "The lead bomber's top turret, twin .50s, against AI 109s."
+    : planeSpec(g.plane.type).name + (g.solo ? '' : ' · K changes plane, B the mode') + '.')
+    + ' Try every control on the stand; the Keys & settings menu (top right) changes things as you watch.'
+    + (hang.paused ? ' Paused.' : '');
+  return v;
+}
+
+// Out of the hangar (Enter or the button): the solo game starts or carries on.
+function takeOff() {
+  if (!hangarSolo || loading) return;
+  hangarSolo = false;
+  if (!hang.paused) {
+    if (game.crew) flash('TOP GUNNER — grab the gun with both fists, shake them to fire', HUD.cyan);
+    else if (game.solo) flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers; the formation is below, ahead'
+      : 'ESCORT — keep the 109s off the bombers', game.team === 'attacker' ? HUD.red : HUD.cyan);
+  }
+  hang.paused = false;
+}
+
 function flash(text, color) {
   flashes.push({ text, color, age: 0 });
   if (flashes.length > 3) flashes.shift();
@@ -100,7 +144,7 @@ function flash(text, color) {
 
 function startCalibration(seconds) {
   if (mode !== 'camera') return;
-  if (duel && duel.phase !== 'calib') { flash('NO PAUSING IN A DUEL — you calibrate before each round', HUD.amber); return; }
+  if (duel && duel.phase !== 'calib' && !inHangar()) { flash('NO PAUSING IN A DUEL — you calibrate before each round', HUD.amber); return; }
   calib = { phase: 'centre', left: seconds || CONFIG.CALIB_COUNTDOWN };
   SFX.calib();
 }
@@ -329,10 +373,18 @@ function frame(ts) {
   }
 
   // The game pauses while recording or calibrating, so nobody crashes into a hill holding
-  // "push forward" or spins while their hand finds the stick again.
+  // "push forward" or spins while their hand finds the stick again. In the hangar the plane sits
+  // on its test stand instead.
+  const hangarUp = inHangar();
+  document.body.classList.toggle('hangar', hangarUp);
+  document.body.classList.toggle('hangar-solo', hangarUp && !duel && !loading);
+  if (hangarUp) {
+    hangarStep(hang, ctrl, dt, { look: headOn ? head.look : null, grip: camera && gunIn.grip });
+    for (const e of hang.events) { if (e.type === 'gun') SFX.gun(); if (e.type === 'cannon') SFX.cannon(); if (e.type === 'missile') SFX.missile(); }
+  }
   const duelHold = duel && !duelFlying(duel);
   if (duel && duel.phase === 'fight' && duel.countdown > 0) duel.countdown -= dt;
-  if (!recorder && !calib && !duelHold) gameUpdate(game, ctrl, dt);
+  if (!recorder && !calib && !duelHold && !hangarUp) gameUpdate(game, ctrl, dt);
   else game.events.length = 0;
   if (duel) {
     duelRemoteStep(duel, game, now, dt);
@@ -383,7 +435,7 @@ function frame(ts) {
     if (e.type === 'ring-miss') { SFX.ringMiss(); flash('MISSED RING', HUD.dim); }
     if (e.type === 'lock') SFX.locked();
   }
-  if (game.lock.target && !game.lock.locked) {
+  if (game.lock.target && !game.lock.locked && !hangarUp) {
     lockTickT -= dt;
     if (lockTickT <= 0) { SFX.lockTick(); lockTickT = 0.12; }
   }
@@ -393,19 +445,20 @@ function frame(ts) {
   if (world) world.shake = shake;
   // Nearly dead: a slow alarm until you're fixed (respawn) or down.
   critT -= dt;
-  if (!game.plane.crashed && game.hp > 0 && game.hp <= CONFIG.CRITICAL_HP && critT <= 0) { SFX.critical(); critT = 0.9; }
+  if (!hangarUp && !game.plane.crashed && game.hp > 0 && game.hp <= CONFIG.CRITICAL_HP && critT <= 0) { SFX.critical(); critT = 0.9; }
   // Warning tones: a slow beep while something locks you, fast and rising as a missile closes.
   warnT -= dt;
-  if (warnT <= 0 && !game.plane.crashed) {
+  if (warnT <= 0 && !game.plane.crashed && !hangarUp) {
     const m = game.warn.missile;
     if (m) { SFX.warnMissile(m.dist < CONFIG.BREAK_DIST[1]); warnT = clamp(m.dist / 4000, 0.07, 0.3); }
     else if (game.warn.lock) { SFX.warnLock(); warnT = 0.45; }
   }
   const gp = game.plane;
-  engineSet((gp.speed - gp.spec.SPEED_MIN) / (gp.spec.SPEED_MAX - gp.spec.SPEED_MIN), !gp.crashed && !(gp.engineCut > 0), gp.spec.PROP);
+  if (hangarUp) engineSet(hang.throttle * 0.8, true, game.crew || gp.spec.PROP);   // (on the stand: the throttle runs it up)
+  else engineSet((gp.speed - gp.spec.SPEED_MIN) / (gp.spec.SPEED_MAX - gp.spec.SPEED_MIN), !gp.crashed && !(gp.engineCut > 0), gp.spec.PROP);
   // WW2 wing over-stressed: creaks, faster the closer it is to letting go.
   creakT -= dt;
-  if (gp.spec.G_LIMIT && !gp.crashed && gp.overG > gp.spec.OVER_G_WARN && creakT <= 0) {
+  if (!hangarUp && gp.spec.G_LIMIT && !gp.crashed && gp.overG > gp.spec.OVER_G_WARN && creakT <= 0) {
     SFX.creak(gp.overG > 1);
     creakT = gp.overG > 1 ? clamp(0.35 - gp.wingStress * 0.3, 0.06, 0.35) : 0.5;
   }
@@ -424,7 +477,8 @@ function frame(ts) {
   if (draw) {
     const view = Object.create(game);
     view.events = pendingEvents;
-    renderWorld(world, view, sinceDraw, now, camera && !game.crew ? head.look : null, ctrl);   // (a turret: the head swings the gun)
+    if (hangarUp) renderHangar(world, hang, game.crew ? 'bomber' : game.plane.type, sinceDraw, now, headOn && !game.crew ? head.look : null);
+    else renderWorld(world, view, sinceDraw, now, camera && !game.crew ? head.look : null, ctrl);   // (a turret: the head swings the gun)
     pendingEvents = [];
     sinceDraw = 0;
     perf.draws++;
@@ -436,11 +490,12 @@ function frame(ts) {
   else if (camera && controls.edge) warn = 'HAND AT EDGE OF CAMERA — bring it toward the middle';
   else if (camera && controls.offCentre && !kbActive) warn = 'Hand is still but the plane is still steering — press C to re-centre';
   else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
-  if (draw) drawHud(hctx, W, H, {
+  if (draw) (hangarUp ? drawHangar : drawHud)(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
     throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash, duel, gunner: gunIn,
-    status: camera ? statusLine() : '',
+    status: camera ? (window.Tracker && Tracker.ready ? statusLine() : 'camera starting…') : '',
     perf: perfLine(camera),
+    hangar: hangarUp ? hangarView() : null,
   });
   if (!camera) {
     controls.raw = { roll: kb.roll, pitch: kb.pitch, yaw: kb.yaw };
@@ -520,37 +575,54 @@ function showScreen(id) {
   if (id) document.getElementById(id).classList.add('active');
 }
 
+// With the camera you wait in the hangar while the hand model loads, and fly solo from there
+// (Enter takes off). Keyboard-only solo goes straight up; Esc brings the hangar back.
 async function start(useCamera, duelOpts) {
   ac();
+  if (loading) return;
   const msg = document.getElementById('start-msg');
-  if (useCamera) {
-    msg.textContent = 'Starting camera and hand model…';
-    try {
-      if (!window.Tracker) throw new Error('Tracker module did not load (open it over http/https — start.bat locally — not by double-clicking the file)');
-      await Tracker.init(video);
-    } catch (err) {
-      console.error(err);
-      msg.textContent = 'Camera failed: ' + err.message + '. You can still fly with the keyboard.';
-      return;
-    }
-  }
   mode = useCamera ? 'camera' : 'keyboard';
-  world = createWorld(glCanvas, settings.renderScale);
-  if (settings.anime) setAnime(world, true);
-  resize();
+  if (!world) {
+    world = createWorld(glCanvas, settings.renderScale);
+    if (settings.anime) setAnime(world, true);
+    resize();
+    requestAnimationFrame(frame);
+  }
   showScreen(null);
   document.body.classList.toggle('debug', debug);
   if (!duelOpts) {
     game = newGame(modePick.value);
     gunIn = createGunnerInput();
     kbGun = { az: 0, el: 20 * DEG };
-    if (game.crew) flash('TOP GUNNER — grab the gun with both fists, shake them to fire', HUD.cyan);
-    else if (game.solo) flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers; the formation is below, ahead'
-      : 'ESCORT — keep the 109s off the bombers', game.team === 'attacker' ? HUD.red : HUD.cyan);
   }
+  hangarSolo = !duelOpts;
+  hang.paused = false;
+  if (useCamera || duelOpts) openMenu();
+  if (useCamera) {
+    loading = 'Starting the camera and the hand model (a few seconds the first time)…';
+    try {
+      if (!window.Tracker) throw new Error('Tracker module did not load (open it over http/https — start.bat locally — not by double-clicking the file)');
+      await Tracker.init(video);
+    } catch (err) {
+      console.error(err);
+      loading = null;
+      hangarSolo = false;
+      mode = 'keyboard';
+      showScreen('screen-start');
+      msg.textContent = 'Camera failed: ' + err.message + '. You can still fly with the keyboard.';
+      return;
+    }
+    loading = null;
+  }
+  if (!useCamera && !duelOpts) takeOff();
   if (duelOpts) duelConnect(duelOpts.name, duelOpts.host, duelOpts.mode);
   else if (useCamera && !isCalibrated(settings) && !game.crew) startCalibration();   // (a turret needs no calibration: grabbing it is the centre)
-  requestAnimationFrame(frame);
+}
+
+// The hangar opens the Keys & settings menu: tuning is what it's for.
+function openMenu() {
+  const m = document.getElementById('menu');
+  if (!m.open) m.open = true;
 }
 
 function toggle(key, a, b, text) {
@@ -578,6 +650,7 @@ minHudBox.addEventListener('change', () => { settings.minHud = minHudBox.checked
 
 document.getElementById('btn-camera').addEventListener('click', () => start(true));
 document.getElementById('btn-keys').addEventListener('click', () => start(false));
+document.getElementById('btn-takeoff').addEventListener('click', e => { e.currentTarget.blur(); takeOff(); });
 
 // Duel start: name + host address (blank = this laptop hosts), remembered for next time.
 function duelOptsFromForm() {
@@ -610,14 +683,22 @@ window.addEventListener('keydown', e => {
   if (!world) return;
   if (e.code === 'KeyD') { debug = !debug; document.body.classList.toggle('debug', debug); }
   if (e.code === 'KeyC') startCalibration();
-  if (e.code === 'Escape') { if (calib && calib.phase === 'range') finishRange(true); calib = null; if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); } }
+  if (e.code === 'Escape') {
+    const busy = calib || recorder;
+    if (calib && calib.phase === 'range') finishRange(true);
+    calib = null;
+    if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); }
+    // Nothing to cancel: back to the hangar (solo; the game waits). Enter takes off again.
+    if (!busy && !duel && !hangarSolo) { hangarSolo = true; hang.paused = true; openMenu(); }
+  }
+  if (e.code === 'Enter' && !duel && hangarSolo) takeOff();
   if (e.code === 'KeyG' && !duel) startRecording();
   if (e.code === 'KeyV') world.view = world.view === 'chase' ? 'cockpit' : 'chase';
   if (e.code === 'Enter' && duel) {
     if (duel.phase === 'calib') { calib = null; duelReady(); }
     if (duel.phase === 'over') duelSend({ t: 'rematch' });
   }
-  if (e.code === 'KeyR' && !duel) { game = newGame(gameKind(game)); gunIn = createGunnerInput(); kbGun = { az: 0, el: 20 * DEG }; flash(game.solo ? 'NEW MISSION' : 'RESET', HUD.ink); }
+  if (e.code === 'KeyR' && !duel) { game = newGame(gameKind(game)); gunIn = createGunnerInput(); kbGun = { az: 0, el: 20 * DEG }; hang.paused = false; flash(game.solo ? 'NEW MISSION' : 'RESET', HUD.ink); }
   if (e.code === 'KeyN' && !duel && !game.solo) {
     if (game.bombers.filter(b => b.alive).length < CONFIG.BOMBER_MAX) spawnBomber(game);
     else flash('BOMBERS: ' + CONFIG.BOMBER_MAX + ' AT ONCE', HUD.dim);

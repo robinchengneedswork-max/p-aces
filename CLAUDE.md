@@ -32,6 +32,8 @@ no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and mi
 - `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
 - Keyboard always works and overrides while held: arrows (down = pull up), Q/E yaw, W/S throttle,
   Space guns, F missile. `V` chase/cockpit, `D` debug panel + camera view, `R` reset.
+- **Hangar**: where you wait (lobbies, calibrating, hand model loading) and where camera solo starts
+  (Enter / Take off); `Esc` in solo flight goes back to it (paused).
 
 ## Layout
 Classic scripts sharing globals, plus `tracker.js` as an ES module (MediaPipe ships as one).
@@ -425,5 +427,23 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   - Keys bar + bottom hint line + Tuning sliders → one collapsible "Keys & settings" menu (top right,
     `<details>`, open state remembered, blurs after clicks so Space/arrows don't toggle it).
   - Backlog (user): **the loading screen as a hangar** where whoever is waiting (duel/escort lobby, or
-    before a mission) can test their camera setup and adjust settings.
+    before a mission) can test their camera setup and adjust settings. (Built in round 26.)
   - Not yet tried by the user with a camera.
+- **Round 26 (2026-10-20): the hangar.** User: "make the loading screen a hangar where someone who is
+  waiting can test their setup and adjust settings". `hangar.js` (pure): `createHangar`, `hangarStep`
+  (the plane on a test stand leans with the controls: HANGAR_ROLL 35°, PITCH/YAW 15°, eased 0.12 s;
+  prop/flame follow the throttle; guns fire sound + tracers out of the doors, no ammo; a crew's top guns
+  swing like the real turret), `hangarChecks` (setup checklist: live rows = camera / hands / face seen
+  now, the rest tick once tried and stay ticked: roll both ways, pull+push, rudder, throttle idle+full,
+  guns, fist, head look; a crew: both hands, grab, shake + a shake meter). `render.js` `makeHangar` /
+  `renderHangar`: its own scene (round roof, doors open on a runway, crates, lamps), camera behind-right,
+  head look walks it round the plane. `hud.js` `drawHangar` (panel + checklist + inputs + camera view);
+  `duelOverlay` split into `duelStatus` (text only) so the hangar's title is the lobby's status (also
+  fixed: the escort calibrate text never showed, the duel one caught it first).
+  - When: `inHangar()` = a duel/escort in HANGAR_PHASES (connecting, failed, disconnected, lobby, calib,
+    over), the hand model loading (`start()` now builds the world first and awaits `Tracker.init` in
+    the hangar), or solo `hangarSolo`: camera solo starts there (Take off button / Enter), Esc during
+    solo flight goes back (paused: the game isn't updated), keyboard solo skips it. The Keys & settings
+    menu is forced visible and opened in the hangar (`body.hangar`), shortened so the input widget shows.
+  - Headless Edge screenshots: jet / 109 / bomber on the stand, Esc → hangar → Enter, no page errors.
+  - Not yet tried by the user.

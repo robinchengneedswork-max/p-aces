@@ -174,6 +174,12 @@ const CONFIG = {
   CREW_EL_MIN: 2 * DEG, CREW_EL_MAX: 85 * DEG,
   CREW_ASSIST_SCALE: 1.5,    // × the gun-assist slider (the same as the WW2 fighters' hidden assist)
   CREW_ASSIST_RANGE: 700,    // m: the gun assist (slider x ASSIST_SCALE) bends rounds onto the lead inside this
+
+  // Hangar (hangar.js): the plane on its test stand leans this far at full deflection.
+  HANGAR_ROLL: 35 * DEG, HANGAR_PITCH: 15 * DEG, HANGAR_YAW: 15 * DEG,
+  HANGAR_EASE: 0.12,         // s: how quickly the stand follows
+  HANGAR_TRY: 0.6,           // deflection that ticks a control off the checklist
+  HANGAR_SHOTS: 12,          // gun sounds/tracers per second on the stand
   GRIP_HOLD: 0.3,            // s a lost hand keeps its grip (blur, a dropped frame)
   AIM_SMOOTH: 0.12,          // s: the fists' position is smoothed this much for aiming (shaking mustn't aim)
   SHAKE_ON: 0.15, SHAKE_OFF: 0.08,   // fist jolt (palm lengths per reading, smoothed): fire above ON, stop below OFF

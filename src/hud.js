@@ -114,6 +114,94 @@ function drawHud(ctx, W, H, st) {
   if (st.debug && st.camera) drawCamView(ctx, W, H, st);   // (the keys live in the Keys & settings menu)
 }
 
+// The hangar (hangar.js): what you're waiting for, a setup checklist, your inputs and the camera
+// view. st.hangar = { title, sub, rows, prompt, crew }; in a duel the duel's status is the title.
+function drawHangar(ctx, W, H, st) {
+  const hg = st.hangar;
+  ctx.clearRect(0, 0, W, H);
+  ctx.lineWidth = 1.5;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const ds = st.duel && duelStatus(st);
+  const title = ds ? ds.text : hg.title, color = ds ? ds.color : HUD.amber;
+  const pw = Math.max(260, Math.min(520, W - 340)), x0 = 16;
+  ctx.font = '14px ' + HUD.font;
+  const subLines = wrapText(ctx, ds ? ds.sub : hg.sub, pw - 24);
+  const rowsY = 84 + subLines.length * 18;
+  const ph = rowsY + 28 + hg.rows.length * 20 + (hg.crew && st.camera ? 26 : 0);
+  ctx.fillStyle = 'rgba(8,12,18,0.62)';
+  ctx.fillRect(x0, 16, pw, ph);
+  ctx.strokeStyle = HUD.dim;
+  ctx.strokeRect(x0, 16, pw, ph);
+  ctx.fillStyle = HUD.dim;
+  ctx.font = 'bold 12px ' + HUD.font;
+  ctx.fillText('HANGAR · test your setup while you wait', x0 + 12, 32);
+  ctx.fillStyle = color;
+  ctx.font = 'bold 26px ' + HUD.font;
+  ctx.fillText(title, x0 + 12, 58);
+  ctx.fillStyle = HUD.ink;
+  ctx.font = '14px ' + HUD.font;
+  subLines.forEach((l, i) => ctx.fillText(l, x0 + 12, 84 + i * 18));
+  // The checklist: ticked once tried; "live" rows (hands in view…) show what's seen right now.
+  ctx.fillStyle = HUD.dim;
+  ctx.font = 'bold 12px ' + HUD.font;
+  ctx.fillText('SETUP CHECK', x0 + 12, rowsY + 10);
+  ctx.font = '14px ' + HUD.font;
+  hg.rows.forEach((r, i) => {
+    const y = rowsY + 32 + i * 20;
+    ctx.fillStyle = r.ok ? HUD.green : r.live ? HUD.amber : HUD.dim;
+    ctx.fillText(r.ok ? '✓' : r.live ? '✗' : '○', x0 + 14, y);
+    ctx.fillStyle = r.ok ? HUD.ink : r.live ? HUD.amber : 'rgba(232,236,243,0.6)';
+    ctx.fillText(r.label, x0 + 36, y);
+  });
+  if (hg.crew && st.gunner && st.camera) {
+    // How hard you're shaking, against the line where the guns fire.
+    const y = rowsY + 32 + hg.rows.length * 20, bw = Math.min(200, pw - 110);
+    ctx.fillStyle = HUD.dim;
+    ctx.font = 'bold 11px ' + HUD.font;
+    ctx.fillText('SHAKE', x0 + 14, y);
+    ctx.strokeStyle = HUD.dim;
+    ctx.strokeRect(x0 + 64, y - 5, bw, 10);
+    ctx.fillStyle = st.gunner.fire ? HUD.amber : HUD.green;
+    ctx.fillRect(x0 + 65, y - 4, (bw - 2) * clamp(st.gunner.shake / (CONFIG.SHAKE_ON * 2), 0, 1), 8);
+    ctx.fillStyle = HUD.ink;
+    ctx.fillRect(x0 + 64 + bw / 2, y - 8, 1.5, 16);
+  }
+
+  if (!hg.crew) drawInputs(ctx, W, H, st);
+  if (st.camera && st.head) drawLook(ctx, W, H, st.head.look);
+  ctx.textAlign = 'center';
+  st.flashes.forEach((f, i) => {
+    ctx.globalAlpha = Math.max(0, 1 - f.age / 1.4);
+    ctx.fillStyle = f.color;
+    ctx.font = 'bold 26px ' + HUD.font;
+    ctx.fillText(f.text, W / 2, H * 0.24 + i * 32);
+  });
+  ctx.globalAlpha = 1;
+  if (st.calib && st.calib.phase === 'range') drawRangeSweep(ctx, W, H, st);
+  else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
+    st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"');
+  else if (hg.prompt) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = HUD.green;
+    ctx.font = 'bold 22px ' + HUD.font;
+    ctx.fillText(hg.prompt, W / 2, H - 40);
+  }
+  if (st.camera) drawCamView(ctx, W, H, st);
+}
+
+// Splits text into lines that fit maxW at the current font.
+function wrapText(ctx, text, maxW) {
+  const out = [];
+  let line = '';
+  for (const word of String(text || '').split(' ')) {
+    const t = line ? line + ' ' + word : word;
+    if (line && ctx.measureText(t).width > maxW) { out.push(line); line = word; } else line = t;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
 // A little arc at the top: where the view is pointing relative to the nose.
 function drawLook(ctx, W, H, look) {
   if (Math.abs(look.yaw) < 3 * DEG && Math.abs(look.pitch) < 3 * DEG) return;
@@ -445,24 +533,32 @@ function drawEscortStatus(ctx, W, H, g, m, back) {
 // Duel screens between the fighting: connecting, waiting, ready, countdown, round/match result.
 // Returns true when it drew something (so the crash text doesn't draw on top).
 function duelOverlay(ctx, W, H, st) {
-  const d = st.duel, op = duelOpponent(d), them = op ? op.name : 'your opponent';
-  if (d.phase === 'connecting') bigText(ctx, W, H, 'CONNECTING', HUD.amber, 'to ' + d.host);
-  else if (d.phase === 'failed') bigText(ctx, W, H, "COULDN'T CONNECT", HUD.red, 'Is Sky Ace running on ' + d.host + ' and on the same Wi-Fi? (Windows may ask to let Node through its firewall.)');
-  else if (d.phase === 'disconnected') bigText(ctx, W, H, 'DISCONNECTED', HUD.red, 'The host stopped. Reload to start again.');
-  else if (d.phase === 'lobby' && d.mode === 'escort') bigText(ctx, W, H, 'WAITING FOR PILOTS', HUD.amber, d.players.length + ' here, 2+ needed · '
-    + (d.host.startsWith('localhost') ? 'other laptops: Bomber escort → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'connected to ' + d.host));
-  else if (d.phase === 'lobby') bigText(ctx, W, H, 'WAITING FOR AN OPPONENT', HUD.amber,
-    d.host.startsWith('localhost') ? 'On the other laptop: Duel → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'Connected to ' + d.host);
-  else if (d.phase === 'calib') bigText(ctx, W, H, d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
-    d.ready ? 'Waiting for ' + them + ' to finish calibrating' : 'Press C (or clap twice) to calibrate, Enter if you\'re set');
-  else if (d.phase === 'fight' && d.countdown > 0 && d.mode === 'escort') bigText(ctx, W, H, String(Math.ceil(d.countdown)), HUD.amber, 'MISSION ' + d.round + ' — '
-    + (st.game.team === 'attacker' ? 'you are the 109: the formation is below you, ~6 km off' : 'you are an escort: the bombers are beside you, the 109 is up there somewhere'));
-  else if (d.phase === 'calib' && d.mode === 'escort') bigText(ctx, W, H, d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
-    d.ready ? 'Waiting for ' + d.players.filter(p => !p.ready).map(p => p.name).join(', ') : 'Mission ' + d.round + ': ' + ((d.players.find(p => p.team === 'attacker') || {}).name || '?') + ' flies the 109. Press C (or clap twice) to calibrate, Enter if set');
-  else if (d.phase === 'fight' && d.countdown > 0) bigText(ctx, W, H, String(Math.ceil(d.countdown)), HUD.amber, 'ROUND ' + d.round + ' — ' + them + ' is 7 km ahead, nose to nose');
-  else if ((d.phase === 'roundEnd' || d.phase === 'over') && d.result) bigText(ctx, W, H, d.result.text, d.result.color, d.result.sub);
-  else return false;
+  const m = duelStatus(st);
+  if (!m) return false;
+  bigText(ctx, W, H, m.text, m.color, m.sub);
   return true;
+}
+
+// The words for the duel's state right now: { text, color, sub }, or null while flying.
+function duelStatus(st) {
+  const d = st.duel, op = duelOpponent(d), them = op ? op.name : 'your opponent';
+  const say = (text, color, sub) => ({ text, color, sub });
+  if (d.phase === 'connecting') return say('CONNECTING', HUD.amber, 'to ' + d.host);
+  if (d.phase === 'failed') return say("COULDN'T CONNECT", HUD.red, 'Is Sky Ace running on ' + d.host + ' and on the same Wi-Fi? (Windows may ask to let Node through its firewall.)');
+  if (d.phase === 'disconnected') return say('DISCONNECTED', HUD.red, 'The host stopped. Reload to start again.');
+  if (d.phase === 'lobby' && d.mode === 'escort') return say('WAITING FOR PILOTS', HUD.amber, d.players.length + ' here, 2+ needed · '
+    + (d.host.startsWith('localhost') ? 'other laptops: Bomber escort → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'connected to ' + d.host));
+  if (d.phase === 'lobby') return say('WAITING FOR AN OPPONENT', HUD.amber,
+    d.host.startsWith('localhost') ? 'On the other laptop: Duel → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'Connected to ' + d.host);
+  if (d.phase === 'calib' && d.mode === 'escort') return say(d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
+    d.ready ? 'Waiting for ' + d.players.filter(p => !p.ready).map(p => p.name).join(', ') : 'Mission ' + d.round + ': ' + ((d.players.find(p => p.team === 'attacker') || {}).name || '?') + ' flies the 109. Press C (or clap twice) to calibrate, Enter if set');
+  if (d.phase === 'calib') return say(d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
+    d.ready ? 'Waiting for ' + them + ' to finish calibrating' : 'Press C (or clap twice) to calibrate, Enter if you\'re set');
+  if (d.phase === 'fight' && d.countdown > 0 && d.mode === 'escort') return say(String(Math.ceil(d.countdown)), HUD.amber, 'MISSION ' + d.round + ' — '
+    + (st.game.team === 'attacker' ? 'you are the 109: the formation is below you, ~6 km off' : 'you are an escort: the bombers are beside you, the 109 is up there somewhere'));
+  if (d.phase === 'fight' && d.countdown > 0) return say(String(Math.ceil(d.countdown)), HUD.amber, 'ROUND ' + d.round + ' — ' + them + ' is 7 km ahead, nose to nose');
+  if ((d.phase === 'roundEnd' || d.phase === 'over') && d.result) return say(d.result.text, d.result.color, d.result.sub);
+  return null;
 }
 
 // Off-screen marker: an arrow on a circle round the middle, pointing toward it.

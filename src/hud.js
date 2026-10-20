@@ -329,13 +329,13 @@ function drawLead(ctx, W, H, st) {
 // Bandits: a red diamond, name + health, and an edge arrow when off screen.
 function drawBandits(ctx, W, H, st) {
   const g = st.game, w = st.world;
-  for (const b of g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [], g.bombers.filter(t => t.alive))) {
+  for (const b of g.bandits.concat(g.remotes.filter(r => r.alive), g.bombers.filter(t => t.alive))) {
     const s = projectToScreen(w, b.pos, W, H);
     const dist = vDist(b.pos, g.plane.pos);
-    if (!s.on) { edgeArrow(ctx, W, H, s, HUD.red); continue; }
+    if (!s.on) { edgeArrow(ctx, W, H, s, escortFriend(g, b) ? HUD.cyan : HUD.red); continue; }
     const isTarget = g.lock.target === b, locked = isTarget && g.lock.locked;
-    const r = 16;
-    ctx.strokeStyle = HUD.red;
+    const r = 16, col = escortFriend(g, b) ? HUD.cyan : HUD.red;
+    ctx.strokeStyle = col;
     ctx.lineWidth = locked ? 3 : 1.5;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y - r); ctx.lineTo(s.x + r, s.y); ctx.lineTo(s.x, s.y + r); ctx.lineTo(s.x - r, s.y); ctx.closePath();
@@ -344,10 +344,10 @@ function drawBandits(ctx, W, H, st) {
       const R = r + 8 + (1 - g.lock.time / CONFIG.LOCK_TIME) * 50;
       ctx.strokeRect(s.x - R, s.y - R, R * 2, R * 2);
     } else if (locked) ctx.strokeRect(s.x - r - 6, s.y - r - 6, (r + 6) * 2, (r + 6) * 2);
-    ctx.fillStyle = HUD.red;
+    ctx.fillStyle = col;
     ctx.font = '11px ' + HUD.font;
     ctx.textAlign = 'left';
-    const label = b.kind === 'remote' ? b.name.toUpperCase() : b.kind === 'bomber' ? 'BOMBER' : SKILLS[b.skill].name;
+    const label = b.kind === 'remote' ? b.name.toUpperCase() + (b.team ? (b.team === 'attacker' ? ' (109)' : ' (P-51)') : '') : b.kind === 'bomber' ? 'BOMBER' : SKILLS[b.skill].name;
     ctx.fillText((locked ? 'LOCK ' : '') + label + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
     ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / (b.maxHp || CONFIG.PLAYER_HP)), 3);
   }
@@ -358,6 +358,25 @@ function drawBandits(ctx, W, H, st) {
 function drawDuelScore(ctx, W, H, st) {
   const d = st.duel, me = duelMe(d), op = duelOpponent(d);
   if (!me) return;
+  if (d.mode === 'escort') {
+    // Mission status: bombers down, the 109's lives, time to the target, your role.
+    const m = d.mission, g = st.game;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px ' + HUD.font;
+    ctx.fillStyle = HUD.green;
+    if (m) {
+      const left = Math.max(0, m.left), t = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+      ctx.fillText('BOMBERS DOWN ' + m.kills + '/' + m.need + '   ·   109 LIVES ' + '▮'.repeat(Math.max(0, m.lives)) + '▯'.repeat(Math.max(0, m.livesMax - m.lives)) + '   ·   TARGET IN ' + t, W / 2, 70);
+    }
+    ctx.font = 'bold 14px ' + HUD.font;
+    ctx.fillStyle = g.team === 'attacker' ? HUD.red : HUD.cyan;
+    if (g.team) ctx.fillText(g.team === 'attacker' ? 'YOU: BF 109 — down the bombers' : 'YOU: P-51 ESCORT — protect the bombers', W / 2, 92);
+    if (g.plane.crashed && d.phase === 'fight') {
+      const back = Math.max(0, CONFIG.ESCORT_RESPAWN - (d.respawnT || 0));
+      ctx.fillText(g.team === 'attacker' && m && m.lives <= 0 ? '' : 'BACK IN ' + Math.ceil(back), W / 2, H * 0.36);
+    }
+    return;
+  }
   ctx.textAlign = 'center';
   ctx.font = 'bold 20px ' + HUD.font;
   ctx.fillStyle = HUD.green;
@@ -371,10 +390,16 @@ function duelOverlay(ctx, W, H, st) {
   if (d.phase === 'connecting') bigText(ctx, W, H, 'CONNECTING', HUD.amber, 'to ' + d.host);
   else if (d.phase === 'failed') bigText(ctx, W, H, "COULDN'T CONNECT", HUD.red, 'Is Sky Ace running on ' + d.host + ' and on the same Wi-Fi? (Windows may ask to let Node through its firewall.)');
   else if (d.phase === 'disconnected') bigText(ctx, W, H, 'DISCONNECTED', HUD.red, 'The host stopped. Reload to start again.');
+  else if (d.phase === 'lobby' && d.mode === 'escort') bigText(ctx, W, H, 'WAITING FOR PILOTS', HUD.amber, d.players.length + ' here, 2+ needed · '
+    + (d.host.startsWith('localhost') ? 'other laptops: Bomber escort → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'connected to ' + d.host));
   else if (d.phase === 'lobby') bigText(ctx, W, H, 'WAITING FOR AN OPPONENT', HUD.amber,
     d.host.startsWith('localhost') ? 'On the other laptop: Duel → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'Connected to ' + d.host);
   else if (d.phase === 'calib') bigText(ctx, W, H, d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
     d.ready ? 'Waiting for ' + them + ' to finish calibrating' : 'Press C (or clap twice) to calibrate, Enter if you\'re set');
+  else if (d.phase === 'fight' && d.countdown > 0 && d.mode === 'escort') bigText(ctx, W, H, String(Math.ceil(d.countdown)), HUD.amber, 'MISSION ' + d.round + ' — '
+    + (st.game.team === 'attacker' ? 'you are the 109: the formation is below you, ~6 km off' : 'you are an escort: the bombers are beside you, the 109 is up there somewhere'));
+  else if (d.phase === 'calib' && d.mode === 'escort') bigText(ctx, W, H, d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
+    d.ready ? 'Waiting for ' + d.players.filter(p => !p.ready).map(p => p.name).join(', ') : 'Mission ' + d.round + ': ' + ((d.players.find(p => p.team === 'attacker') || {}).name || '?') + ' flies the 109. Press C (or clap twice) to calibrate, Enter if set');
   else if (d.phase === 'fight' && d.countdown > 0) bigText(ctx, W, H, String(Math.ceil(d.countdown)), HUD.amber, 'ROUND ' + d.round + ' — ' + them + ' is 7 km ahead, nose to nose');
   else if ((d.phase === 'roundEnd' || d.phase === 'over') && d.result) bigText(ctx, W, H, d.result.text, d.result.color, d.result.sub);
   else return false;
@@ -590,7 +615,7 @@ function drawReflector(ctx, W, H, st) {
 function drawContacts(ctx, W, H, st) {
   const g = st.game, w = st.world;
   const pxPerM = H / 2 / Math.tan(w.camera.fov * DEG / 2);
-  const all = g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [], g.bombers.filter(b => b.alive), g.drones);
+  const all = g.bandits.concat(g.remotes.filter(r => r.alive), g.bombers.filter(b => b.alive), g.drones);
   ctx.fillStyle = 'rgba(30, 34, 40, 0.85)';
   for (const t of all) {
     const d = vDist(t.pos, w.camera.position);

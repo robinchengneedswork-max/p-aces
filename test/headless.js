@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -852,6 +852,65 @@ console.log('WW2 duel');
   }
   check('Ann sees Bob as a 109, firing its cannon tracers', A.g.remote && A.g.remote.plane.type === 'bf109' && remoteCannon > 0, remoteCannon + ' cannon rounds');
   check("Bob's hits land on Ann's laptop: a cannon hit is 20 HP (five kill), a machine-gun round 1.25", big > 0 && Math.abs(100 - A.g.hp - Math.min(100, dmg)) < 1e-6, big + ' cannon hits, ' + dmg + ' HP');
+}
+
+console.log('escort (client side)');
+{
+  const DT = 1 / 60;
+  const g = X.createGame(61, 'escort', 'jet');
+  g.bombersRemote = true;
+  const d = X.createDuel('Ann', 'escort');
+  const rx = m => X.escortReceive(d, g, m, 0);
+  rx({ t: 'welcome', id: 1, lan: [], mode: 'escort' });
+  rx({ t: 'room', mode: 'escort', phase: 'fight', round: 1, players: [{ id: 1, name: 'Ann', team: 'escort' }, { id: 2, name: 'Bob', team: 'attacker' }, { id: 3, name: 'Cat', team: 'escort' }] });
+  const y = X.groundHeight(0, 0) + 6000;
+  rx({ t: 'go', round: 1, countdown: 0, spawns: { 1: { x: 400, y: y + 150, z: 0, hx: 0, hz: -1, ty: 'p51', team: 'escort' } } });
+  check('the server picks your plane and side: P-51 escort', g.plane.type === 'p51' && g.team === 'escort' && Math.abs(g.plane.pos.y - y - 150) < 1);
+  const bomberRow = (id, x, z) => [id, x, y, z, 0, 0, -1, 0, 1, 0, 130, 60, 1, 0, 7];
+  const r = rx({ t: 'bombers', b: [bomberRow(10, 0, 0), bomberRow(11, -85, 70)], r: [[0, y, 0, 0, 0, -900]], ev: [] });
+  check("the server's bombers appear, and its gunners' rounds", g.bombers.length === 2 && g.bombers[0].alive && g.bullets.some(b => b.owner === 'bomber') && r.ev.length === 0);
+  check('bombers and fellow escorts are friends, the 109 a foe', X.escortFriend(g, g.bombers[0]) && X.escortFriend(g, { kind: 'remote', team: 'escort' }) && !X.escortFriend(g, { kind: 'remote', team: 'attacker' }));
+  // Snapshots from two laptops become two remote planes.
+  rx({ t: 's', from: 2, p: [0, y + 2000, -5000], f: [0, 0, 1], u: [0, 1, 0], v: 150, th: 1, ty: 'bf109', hp: 100, dead: false, gun: false, m: [] });
+  rx({ t: 's', from: 3, p: [-400, y + 150, 0], f: [0, 0, -1], u: [0, 1, 0], v: 150, th: 1, ty: 'p51', hp: 100, dead: false, gun: false, m: [] });
+  X.duelRemoteStep(d, g, 1, DT);
+  check('every other laptop is a plane: the 109 and a fellow P-51', g.remotes.length === 2 && g.remotes.find(R => R.peer === 2).plane.type === 'bf109' && g.remotes.find(R => R.team === 'escort').name === 'Cat');
+  // Your rounds into a bomber are sent to the server, not applied here.
+  g.bullets = [];
+  const b0 = g.bombers[0];
+  g.bullets.push({ pos: X.vAdd(b0.pos, X.v3(0, 50, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'player', power: 0.4 });
+  X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, cannon: false, missile: false }, DT);
+  const bh = g.events.find(e => e.type === 'bomber-hit');
+  check('your hit on a bomber becomes a bomber-hit for the server (its HP untouched here)', bh && bh.id === 10 && bh.dmg === 0.4 && b0.hp === 60);
+  // …and rounds into the fellow escort are friendly fire for its laptop.
+  const cat = g.remotes.find(R => R.peer === 3);
+  g.bullets.push({ pos: X.vAdd(cat.pos, X.v3(0, 50, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'player', power: 1 });
+  X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, cannon: false, missile: false }, DT);
+  check('friendly fire: hitting a fellow escort sends it a hit', g.events.some(e => e.type === 'duel-hit' && e.to === 3));
+  // Bombers fly on between updates; the server's events come back as game events.
+  const z0 = b0.pos.z;
+  X.escortStep(d, g, 0.5);
+  check('bombers carry on between server updates', Math.abs(b0.pos.z - (z0 - 65)) < 0.5);
+  const killed = rx({ t: 'bombers', b: [[10, 0, y, 0, 0, -0.5, -0.86, 0, 0.86, -0.5, 140, 0, 0, 15, 0], bomberRow(11, -85, 70)], r: [], ev: [{ type: 'kill', bomber: true, pos: { x: 0, y, z: 0 } }] });
+  check("the server's kill arrives as an event; the bomber falls (not a target)", killed.ev[0].type === 'kill' && !g.bombers[0].alive && g.bombers[0].burning.every(Boolean));
+  // Shot down: back beside the formation after ESCORT_RESPAWN.
+  g.plane.crashed = true;
+  rx({ t: 'mission', kills: 1, need: 3, lives: 3, livesMax: 3, left: 200, attacker: 2 });
+  for (let t = 0; t < CONFIG.ESCORT_RESPAWN + 0.2; t += DT) { X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5 }, DT); X.escortStep(d, g, DT); }
+  const near = Math.min(...g.bombers.map(b => X.vDist(b.pos, g.plane.pos)));
+  check('shot down: back in by the formation after ' + CONFIG.ESCORT_RESPAWN + ' s, rearmed', !g.plane.crashed && near < 1000 && g.plane.ammo.every((a, i) => a === g.plane.spec.GUNS[i].ammo), Math.round(near) + ' m');
+  // The 109 with no lives left stays down.
+  g.team = 'attacker';
+  g.plane.crashed = true;
+  rx({ t: 'mission', kills: 1, need: 3, lives: 0, livesMax: 3, left: 100, attacker: 1 });
+  for (let t = 0; t < CONFIG.ESCORT_RESPAWN + 1; t += DT) X.escortStep(d, g, DT);
+  check('the 109 out of lives stays down', g.plane.crashed);
+  rx({ t: 'mission', kills: 1, need: 3, lives: 2, livesMax: 3, left: 100, attacker: 1 });
+  for (let t = 0; t < CONFIG.ESCORT_RESPAWN + 0.2; t += DT) X.escortStep(d, g, DT);
+  const above = g.plane.pos.y - g.bombers[1].pos.y, out = Math.hypot(g.plane.pos.x - g.bombers[1].pos.x, g.plane.pos.z - g.bombers[1].pos.z);
+  check('…with lives, the 109 comes back high above and well out', !g.plane.crashed && above > 1500 && out > 3500, Math.round(above) + ' m up, ' + Math.round(out) + ' m out');
+  const over = rx({ t: 'over', winner: 'escort', why: 'time' });
+  check('mission over reaches main.js', d.phase === 'over' && over.ui[0].type === 'escort-over' && over.ui[0].winner === 'escort');
 }
 
 console.log('plane specs');

@@ -9,10 +9,10 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (235 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (247 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 `node test/duel.js` (22 checks: the LAN duel server with real WebSocket clients) and `node test/planes.js [report]`
-(19 checks: WW2 flight models).
+(19 checks: WW2 flight models) and `node test/escort.js` (16 checks: the bomber-escort room over real sockets).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -355,3 +355,26 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     cockpit shows the long cowling over the dash. Sounds: lower prop drone, cannon thump, wing creak.
   - Browser-checked: models, cockpit, sight, minimal HUD speck, over-G HUD at 10 G. Two-page duel:
     each side sees the other's type (background tab froze A's countdown: headless-only).
+- **Round 23 (2026-10-20): bomber escort over the LAN.** User: "an alternate duel mode … bomber escort,
+  a 109 that's a sheep among wolves, P-51Ds running escort … something to focus the action instead of
+  endless turn fighting"; friendly fire yes; 109 wins at 3 bombers.
+  - `duel-server.js` `/escort` → `createEscortRoom`: 2-8 laptops; the 109 role passes round each
+    mission (`(round-1) % n`), the rest P-51s. **The server flies the formation**: it loads
+    config/math/planes/flight/ai/game.js into a vm (like the tests) and runs `updateBombers` at 20 Hz;
+    bomber states + its gunners' new rounds + events (kill, engine-fire, gunner-down, bomber-crash)
+    go to everyone. Gunners shoot only at the 109 (`g.gunTargets` = its snapshot). Hits on bombers are
+    shooter-decided `bhit {id, part, dmg}` judged by the server; hits on people go `hit {to}` to that
+    laptop only (friendly fire). 109 `down` → lives−1; 3 kills → 109 wins; lives 0 → escorts; 300 s →
+    escorts ("reached the target"); 109 leaving → escorts. Late joiners go straight in as escorts.
+  - Spawns: formation (6, `FORMATION` combat box) 6 km above ground at a random spot/heading; escorts
+    beside + 450 m behind it (so it's ahead of you), 150 m up; the 109 6 km out at 40-140° off its
+    heading, 2 km above, facing in. Respawn after 5 s (`escort.js`), the 109 only while it has lives.
+  - Client: `duel.js` now carries any number of peers (`d.peers`, `g.remotes`; `g.remote` = first, so
+    duels and their tests are unchanged); `escort.js` applies server bombers/rounds/events, carries
+    bombers on between updates, respawns you. HUD: mission line (bombers down, 109 lives, time to
+    target), role line, friends cyan / foes red markers.
+  - Verified: 12 client checks (headless), 16 server checks over real sockets, and two separate
+    headless Edge processes over the real Wi-Fi address: roles, types, 6 bombers on both, a bomber
+    shot down from either side (incl. friendly fire) counted on both, gunners hitting the 109 only.
+    Found: tick cleared bhit kill events before reading them; tracers had a 0.3 m width floor (bars
+    across the screen when rounds pass the camera); escorts started beside the formation, off screen.

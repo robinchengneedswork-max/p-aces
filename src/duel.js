@@ -3,17 +3,19 @@
 // (duelSnapshot) and draws the other plane a beat in the past, between two updates it already has,
 // so it moves smoothly (duelRemoteStep). The shooter decides hits: game.js turns your hits into
 // 'duel-hit' events that main.js sends; the other laptop's hits arrive as 'hit' messages.
+// The same code carries escort mode's several laptops: every peer's snapshots arrive tagged
+// 'from', each becomes an entry in g.remotes (g.remote = the first, which is all a duel has).
 
-function createDuel(name) {
+function createDuel(name, mode) {
   return {
+    mode: mode || 'duel',      // 'duel' | 'escort'
     name: name || 'Pilot',
     myId: null, phase: 'connecting', round: 0, target: 5,
     players: [], lan: [],
     ready: false,              // sent 'ready' this calibration
     countdown: 0,              // seconds left before the round starts
     result: null,              // { text, color, until } after a round
-    snaps: [],                 // the other plane's recent states: { at, ... }
-    gunAcc: 0,
+    peers: {},                 // per other laptop: { snaps: recent states { at, ... }, gunAcc }
     sendAcc: 0,
   };
 }
@@ -46,11 +48,13 @@ function duelSnapshot(g, firing, cannon) {
   };
 }
 
-// A round starts: our plane at the server's spawn point, everything else cleared.
+// A round starts: our plane at the server's spawn point, everything else cleared. Escort spawns give
+// an absolute height (y), the plane for your role (ty) and your side (team).
 function duelSpawn(g, sp) {
   const pos = v3(sp.x, 0, sp.z);
-  pos.y = groundHeight(pos.x, pos.z) + sp.alt;
-  g.plane = createPlane(pos, v3(sp.hx, 0, sp.hz), g.plane.type);
+  pos.y = sp.y ?? groundHeight(pos.x, pos.z) + sp.alt;
+  g.plane = createPlane(pos, v3(sp.hx, 0, sp.hz), sp.ty || g.plane.type);
+  if (sp.team) g.team = sp.team;
   g.plane.speed = g.plane.spec.CORNER_SPEED + 30;
   g.hp = CONFIG.PLAYER_HP;
   g.bullets = [];
@@ -82,9 +86,10 @@ function duelReceive(d, g, m, now) {
     d.phase = 'fight';
     d.round = m.round;
     d.countdown = m.countdown;
-    d.snaps = [];
+    d.peers = {};
     duelSpawn(g, m.spawns[d.myId]);
     g.remote = null;
+    g.remotes = [];
     out.push({ type: 'go', round: m.round });
   } else if (m.t === 'roundEnd') {
     d.phase = 'roundEnd';
@@ -94,8 +99,9 @@ function duelReceive(d, g, m, now) {
     d.phase = 'over';
     out.push({ type: 'over', won: m.winner === d.myId });
   } else if (m.t === 's') {
-    d.snaps.push({ at: now, ...m });
-    if (d.snaps.length > 30) d.snaps.shift();
+    const P = d.peers[m.from ?? 0] || (d.peers[m.from ?? 0] = { snaps: [], gunAcc: 0 });
+    P.snaps.push({ at: now, ...m });
+    if (P.snaps.length > 30) P.snaps.shift();
   } else if (m.t === 'hit') {
     if (duelFlying(d)) { hurtPlayer(g, m.dmg, g.plane.pos); out.push({ type: 'hit', dmg: m.dmg }); }
   }
@@ -107,10 +113,22 @@ function nlerp(a, b, k) {
   return vNorm(v3(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k));
 }
 
-// Place the other plane (and its missiles and tracers) for this frame.
+// Place the other planes (and their missiles and tracers) for this frame. A laptop that has left
+// the room drops out.
 function duelRemoteStep(d, g, now, dt) {
-  const S = d.snaps;
-  if (!S.length) { g.remote = null; g.missiles = g.missiles.filter(m => !m.remote); return; }
+  for (const id of Object.keys(d.peers)) {
+    if (id !== '0' && d.players.length && !d.players.some(p => String(p.id) === id)) delete d.peers[id];
+  }
+  const live = new Set(Object.keys(d.peers).filter(id => d.peers[id].snaps.length));
+  g.remotes = g.remotes.filter(R => live.has(String(R.peer)));
+  g.missiles = g.missiles.filter(m => !m.remote || live.has(String(m.peer)));
+  for (const id of live) peerStep(d, g, id, now, dt);
+  g.remote = g.remotes[0] || null;
+}
+
+function peerStep(d, g, id, now, dt) {
+  const P = d.peers[id], S = P.snaps;
+  const peer = id === '0' ? 0 : Number(id);
   const at = now - CONFIG.DUEL_INTERP;
   let a = S[0], b = null;
   for (let i = 0; i < S.length - 1; i++) if (S[i].at <= at && S[i + 1].at >= at) { a = S[i]; b = S[i + 1]; break; }
@@ -132,11 +150,13 @@ function duelRemoteStep(d, g, now, dt) {
   const last = S[S.length - 1];
   const right = vNorm(vCross(fwd, up));
   up = vCross(right, fwd);
-  const R = g.remote || (g.remote = { id: 'remote', kind: 'remote', plane: createPlane(pos, null, last.ty) });
+  let R = g.remotes.find(x => x.peer === peer);
+  if (!R) { R = { id: peer ? 'remote' + peer : 'remote', peer, kind: 'remote', plane: createPlane(pos, null, last.ty) }; g.remotes.push(R); }
   // The other pilot picked a different plane this round: swap the model's flight spec.
   if (R.plane.type !== planeSpec(last.ty).type) R.plane = createPlane(pos, null, last.ty);
-  const op = duelOpponent(d);
-  R.name = op ? op.name : 'OPPONENT';
+  const who = d.players.find(p => p.id === peer) || duelOpponent(d);
+  R.name = who ? who.name : 'OPPONENT';
+  R.team = who && who.team;           // escort: 'escort' | 'attacker'
   R.hp = last.hp;
   R.alive = !last.dead;
   R.plane.pos = pos; R.plane.fwd = fwd; R.plane.up = up; R.plane.right = right; R.plane.path = fwd;
@@ -147,15 +167,15 @@ function duelRemoteStep(d, g, now, dt) {
   // Their missiles: newest positions, carried forward to now.
   const seen = new Set();
   for (const q of last.m || []) {
-    const key = 'r' + q[0];
+    const key = 'r' + peer + '_' + q[0];
     seen.add(key);
     const dir = v3(q[4], q[5], q[6]);
     const pos2 = vAdd(v3(q[1], q[2], q[3]), vScale(dir, q[7] * clamp(now - last.at, 0, CONFIG.DUEL_EXTRAP_MAX)));
     let m = g.missiles.find(x => x.remote && x.key === key);
-    if (!m) { m = { remote: true, key, owner: 'remote', age: 0 }; g.missiles.push(m); }
+    if (!m) { m = { remote: true, key, peer, owner: 'remote', age: 0 }; g.missiles.push(m); }
     m.pos = pos2; m.dir = dir; m.speed = q[7]; m.tracking = !!q[8];
   }
-  g.missiles = g.missiles.filter(m => !m.remote || seen.has(m.key));
+  g.missiles = g.missiles.filter(m => !m.remote || m.peer !== peer || seen.has(m.key));
 
   // Their guns: tracers from their plane while they're firing (looks only; their laptop scores).
   // WW2 planes: their real guns and cannons (we don't know their ammo: their laptop stops sending gun).
@@ -163,9 +183,9 @@ function duelRemoteStep(d, g, now, dt) {
     if (R.alive) fireGuns(g, R.plane, { mg: !!last.gun, cannon: !!last.cn }, dt, 'remote', false);
     return;
   }
-  d.gunAcc = last.gun && R.alive ? d.gunAcc + dt * CONFIG.GUN_RATE : Math.min(d.gunAcc, 1);
-  while (last.gun && R.alive && d.gunAcc >= 1) {
-    d.gunAcc -= 1;
+  P.gunAcc = last.gun && R.alive ? P.gunAcc + dt * CONFIG.GUN_RATE : Math.min(P.gunAcc, 1);
+  while (last.gun && R.alive && P.gunAcc >= 1) {
+    P.gunAcc -= 1;
     fireBullet(g, R.plane, R.plane.fwd, 'remote');
   }
 }

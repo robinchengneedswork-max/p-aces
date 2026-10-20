@@ -2,7 +2,9 @@
 // 'dogfight' (B): one bandit at a time, flown by ai.js, that shoots back; rookies, then regulars,
 // then aces. 'duel': a human on another laptop (g.remote, kept up to date by duel.js); your hits on
 // them become 'duel-hit' events for main.js to send, theirs arrive as messages. No respawn there:
-// the duel server starts each round. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
+// the duel server starts each round. 'escort': several humans (g.remotes) around a bomber formation
+// the server flies (escort.js applies its states; g.bombersRemote): your hits on a bomber become
+// 'bomber-hit' events for the server to judge. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
 //
 // Bullets and missiles carry an owner ('player' or a bandit id) and hit only the other side.
 // Things a missile can chase are { pos, vel, alive }: drones, bandits, bombers, and g.player (you).
@@ -23,7 +25,8 @@ function createGame(seed, mode, planeType) {
     drones: [],
     bandits: [],
     bombers: [],
-    remote: null,                           // duel: the other laptop's plane (duel.js)
+    remote: null,                           // duel: the other laptop's plane (duel.js) = remotes[0]
+    remotes: [],                            // duel / escort: every other laptop's plane
     ring: null,
     gunAcc: 0,
     missileCd: 0,
@@ -105,6 +108,19 @@ function spawnBomber(g) {
   const dir = vRotate(heading, WORLD_UP, ang);
   const pos = vSub(cross, vScale(dir, CONFIG.BOMBER_SPEED * CONFIG.BOMBER_LEAD_TIME));
   pos.y = clamp(p.pos.y + (g.rng() - 0.5) * 300, groundHeight(pos.x, pos.z) + 500, CONFIG.CEILING - 300);
+  const b = makeBomber(g, pos, dir);
+  g.events.push({ type: 'bomber', pos });
+  return b;
+}
+
+// A combat box of bombers (escort mode): lead at centre, the rest stepped back, out and up/down
+// (FORMATION, in the lead's frame: right, back, up), all flying heading.
+function spawnFormation(g, center, heading) {
+  const right = vNorm(vCross(heading, WORLD_UP));
+  return CONFIG.FORMATION.map(([x, back, y]) => makeBomber(g, vAdd(center, vAdd(vScale(right, x), vAdd(vScale(heading, -back), v3(0, y, 0)))), heading));
+}
+
+function makeBomber(g, pos, dir) {
   const plane = createPlane(pos, dir);
   plane.speed = CONFIG.BOMBER_SPEED;
   const b = {
@@ -115,7 +131,6 @@ function spawnBomber(g) {
     alive: true, spin: (g.rng() < 0.5 ? -1 : 1) * (0.15 + g.rng() * 0.2),
   };
   g.bombers.push(b);
-  g.events.push({ type: 'bomber', pos });
   return b;
 }
 
@@ -161,17 +176,30 @@ function killBomber(g, b, how) {
 
 // The bomber's gunners: each covers its side, leads you like your own sight does, and misses by
 // an error that tightens while your line of sight holds steady (see BOMBER_GUNNERS in config).
+// Who a gunner can shoot at: g.gunTargets (escort server: the 109) or you.
+function gunnerSees(gu, b, Y) {
+  const at = bomberPartPos(b, gu);
+  const to = vSub(Y.pos, at), dist = vLen(to);
+  const u = vScale(to, 1 / (dist || 1));
+  const up = vDot(u, b.plane.up), back = -vDot(u, b.plane.fwd);
+  const covered = gu.covers === 'up' ? up > -0.1 : gu.covers === 'down' ? up < 0.1 : back > 0.35;
+  return { at, to, dist, u, can: Y.alive && covered && dist < CONFIG.GUNNER_RANGE };
+}
+
 function updateGunners(g, b, dt) {
-  const P = b.plane, Y = g.player;
+  const P = b.plane;
   for (const gu of b.gunners) {
     gu.firing = false;
     if (gu.hp <= 0) continue;
-    const at = bomberPartPos(b, gu);
-    const to = vSub(Y.pos, at), dist = vLen(to);
-    const u = vScale(to, 1 / (dist || 1));
-    const up = vDot(u, P.up), back = -vDot(u, P.fwd);
-    const covered = gu.covers === 'up' ? up > -0.1 : gu.covers === 'down' ? up < 0.1 : back > 0.35;
-    const can = Y.alive && covered && dist < CONFIG.GUNNER_RANGE;
+    // The nearest target it can bear on; a new target starts its aim over.
+    let Y = null, best = Infinity;
+    for (const t of g.gunTargets || [g.player]) {
+      const s = gunnerSees(gu, b, t);
+      if (s.can && s.dist < best) { best = s.dist; Y = t; }
+    }
+    if (Y !== gu.target) { gu.target = Y; gu.los = null; gu.err = CONFIG.GUNNER_ERR_MAX; }
+    if (!Y) { gu.acc = Math.min(gu.acc, 1); continue; }
+    const { at, to, u, can } = gunnerSees(gu, b, Y);
     // How fast you move across its view (the bomber flies straight, so world = its frame).
     const rate = gu.los && dt > 0 ? Math.acos(clamp(vDot(gu.los, u), -1, 1)) / dt : Infinity;
     gu.los = can ? u : null;
@@ -210,7 +238,7 @@ function updateBombers(g, dt) {
     if (b.alive) {
       const fires = b.burning.filter(Boolean).length;
       if (fires) { b.hp -= fires * CONFIG.BOMBER_BURN * dt; if (b.hp <= 0) killBomber(g, b, 'fire'); }
-      if (vDist(b.pos, g.plane.pos) > CONFIG.BOMBER_MAX_DIST) b.gone = true;
+      if (g.mode !== 'escort' && vDist(b.pos, g.plane.pos) > CONFIG.BOMBER_MAX_DIST) b.gone = true;
       if (b.alive) updateGunners(g, b, dt);
     } else {
       // Nose toward the ground (world down, not its own belly: it is rolling as it falls).
@@ -242,7 +270,7 @@ function placeRing(g) {
 }
 
 function lockables(g) {
-  return g.drones.concat(g.bandits, g.bombers, g.remote ? [g.remote] : []).filter(t => t.alive);
+  return g.drones.concat(g.bandits, g.bombers, g.remotes).filter(t => t.alive);
 }
 
 function updateLock(g, dt) {
@@ -375,7 +403,7 @@ function gameUpdate(g, ctrl, dt) {
       g.events.push({ type: p.shotDown ? 'shot-down' : 'crash', pos: p.pos });
     }
     g.respawnT += dt;
-    if (g.respawnT >= CONFIG.RESPAWN_TIME && g.mode !== 'duel') respawnPlayer(g);
+    if (g.respawnT >= CONFIG.RESPAWN_TIME && g.mode !== 'duel' && g.mode !== 'escort') respawnPlayer(g);   // escort.js respawns there
   } else {
     const before = p.pos;
     flightStep(p, ctrl, dt, ctrl.assist);
@@ -413,7 +441,7 @@ function gameUpdate(g, ctrl, dt) {
   if (p.crashed) { g.gunSol = null; g.gunAssisted = false; }
 
   if (g.mode === 'dogfight') updateBandits(g, dt);
-  updateBombers(g, dt);
+  if (!g.bombersRemote) updateBombers(g, dt);   // escort: the server flies them (escort.js)
   updateBullets(g, dt);
   updateMissiles(g, dt);
 
@@ -519,12 +547,19 @@ function updateBullets(g, dt) {
       }
       for (const t of g.bombers) {
         const part = b.age < 99 && t.alive && bomberHit(t, prev, b.pos, 0);
-        if (part) { hitBomber(g, t, power, part, b.pos, 'gun'); b.age = 99; break; }
-      }
-      const R = g.remote;
-      if (b.age < 99 && R && R.alive && segPointDist(prev, b.pos, R.pos) < (R.plane.spec.HIT_R ?? CONFIG.DUEL_HIT_R)) {
-        g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG * power, pos: b.pos });
+        if (!part) continue;
+        // Escort: the server keeps the bombers; tell it (and show the spark here).
+        if (g.bombersRemote) g.events.push({ type: 'bomber-hit', id: t.id, part: CONFIG.BOMBER_PARTS.indexOf(part), dmg: power, pos: b.pos }, { type: 'hit', pos: b.pos });
+        else hitBomber(g, t, power, part, b.pos, 'gun');
         b.age = 99;
+        break;
+      }
+      // Other laptops' planes (friend or foe: there's friendly fire). Their laptop takes the hit.
+      for (const R of g.remotes) {
+        if (b.age < 99 && R.alive && segPointDist(prev, b.pos, R.pos) < (R.plane.spec.HIT_R ?? CONFIG.DUEL_HIT_R)) {
+          g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG * power, pos: b.pos, to: R.peer });
+          b.age = 99;
+        }
       }
     } else if (b.owner === 'remote') {
       // The other laptop's rounds: drawn here, but only their laptop decides what they hit.
@@ -567,10 +602,11 @@ function updateMissiles(g, dt) {
       for (const d of g.drones) {
         if (d.alive && segPointDist(prev, m.pos, d.pos) < CONFIG.DRONE_R * 1.5) { killDrone(g, d, 'missile'); m.age = 99; break; }
       }
-      const R = g.remote;
-      if (R && R.alive && m.age < 99 && segPointDist(prev, m.pos, R.pos) < CONFIG.MISSILE_FUSE) {
-        g.events.push({ type: 'duel-hit', dmg: CONFIG.ENEMY_MISSILE_DMG, pos: m.pos }, { type: 'boom', pos: m.pos });
-        m.age = 99;
+      for (const R of g.remotes) {
+        if (R.alive && m.age < 99 && segPointDist(prev, m.pos, R.pos) < CONFIG.MISSILE_FUSE) {
+          g.events.push({ type: 'duel-hit', dmg: CONFIG.ENEMY_MISSILE_DMG, pos: m.pos, to: R.peer }, { type: 'boom', pos: m.pos });
+          m.age = 99;
+        }
       }
       for (const t of g.bombers) {
         const part = m.age < 99 && t.alive && bomberHit(t, prev, m.pos, CONFIG.MISSILE_FUSE);

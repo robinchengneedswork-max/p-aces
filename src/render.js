@@ -484,7 +484,7 @@ function updateTracers(w, bullets) {
     const dist = vLen(toCam);
     let side = vCross(dir, toCam);
     if (vLen(side) < 1e-6) continue;
-    side = vScale(vNorm(side), Math.max(0.3, dist * TRACER_PX) / 2);
+    side = vScale(vNorm(side), Math.max(0.05, dist * TRACER_PX) / 2);   // (a 0.3 m floor drew rounds whizzing past the camera as bars)
     const h0 = vAdd(b.pos, side), h1 = vSub(b.pos, side), t0 = vAdd(tail, side), t1 = vSub(tail, side);
     pos.array.set([h0.x, h0.y, h0.z, h1.x, h1.y, h1.z, t0.x, t0.y, t0.z, t1.x, t1.y, t1.z], n * 12);
     const [H, T] = b.owner === 'player' ? TRACER_COLORS.mine : TRACER_COLORS.theirs;
@@ -667,7 +667,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   // Bandits: same as drones, plane models flown by ai.js.
   const flying = new Set();
   // The duel opponent is drawn the same way, in its own colours.
-  const others = (g.bandits || []).concat(g.remote && g.remote.alive ? [g.remote] : []);
+  const others = (g.bandits || []).concat((g.remotes || []).filter(r => r.alive));
   for (const b of others) {
     flying.add(b.id);
     let m = w.bandits.get(b.id);
@@ -763,7 +763,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     }
   };
   smokeFrom(p, g.hp / CONFIG.PLAYER_HP);
-  if (g.remote && g.remote.alive) smokeFrom(g.remote.plane, g.remote.hp / CONFIG.PLAYER_HP);
+  for (const R of g.remotes || []) if (R.alive) smokeFrom(R.plane, R.hp / CONFIG.PLAYER_HP);
   for (const b of g.bandits || []) smokeFrom(b.plane, b.hp / b.maxHp);
   // Bombers smoke from each burning engine (all four once it's going down).
   for (const b of g.bombers || []) {

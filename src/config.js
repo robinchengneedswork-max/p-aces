@@ -152,6 +152,16 @@ const CONFIG = {
   GUNNER_SPREAD: 0.4 * DEG,
   WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
+  // Escort (bomber escort over the LAN, duel-server.js escort room): one 109 against a formation
+  // and its P-51 escorts. The server flies the bombers and their gunners (who shoot only at the 109).
+  FORMATION: [[0, 0, 0], [-85, 70, 25], [85, 70, 25], [0, 150, -30], [-170, 150, -10], [170, 150, -10]],
+  ESCORT_ALT: 6000,          // formation height above the ground at the start
+  ESCORT_KILLS: 3,           // bombers the 109 must bring down
+  ESCORT_LIVES: 3,           // times the escorts must shoot the 109 down
+  ESCORT_TIME: 300,          // s: then the bombers reach the target (escorts win)
+  ESCORT_RESPAWN: 5,         // s before you're back in (the 109 high above, escorts by the formation)
+  ESCORT_SEND_HZ: 20,        // bomber states from the server
+
   // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal
   DUEL_ROUND_TIME: 180,      // s: a round nobody wins by then is a draw (WW2 ammo runs out; keep in step with duel-server.js)
   DUEL_HIT_R: 12,            // gun hit radius on the other human's plane (same both ways)

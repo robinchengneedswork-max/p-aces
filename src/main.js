@@ -27,6 +27,7 @@ let lockTickT = 0;
 let creakT = 0;                 // time to the next over-G creak
 let duel = null;               // 1v1 LAN duel state (duel.js), or null
 let duelWs = null;             // its WebSocket to the host laptop
+let escortEvents = [];         // escort: game events from the server (kills, fires…) to replay this frame
 let drawAcc = 0;               // anime look: time banked toward the next 24 fps picture
 let sinceDraw = 0;             // time since the last picture (what the renderer animates by)
 let pendingEvents = [];        // game events since the last picture (explosions mustn't be skipped)
@@ -109,17 +110,24 @@ function finishRange(skip) {
 // ---- Duel (two laptops on the same Wi-Fi) ----
 // Each laptop runs its own Sky Ace on localhost (the camera needs it) and connects here to the
 // host laptop's server. host '' = this laptop hosts.
-function duelConnect(name, host) {
-  duel = createDuel(name);
-  game = createGame(Date.now() % 100000, 'duel', settings.plane);
+// mode 'escort': the bomber-escort room on the same server (escort.js).
+function duelConnect(name, host, mode = 'duel') {
+  duel = createDuel(name, mode);
+  game = createGame(Date.now() % 100000, mode, settings.plane);
+  if (mode === 'escort') game.bombersRemote = true;
   const addr = (host || 'localhost').trim().replace(/^\w+:\/\//, '').replace(/\/.*$/, '');
   duel.host = addr.includes(':') ? addr : addr + ':8068';
-  try { duelWs = new WebSocket('ws://' + duel.host + '/duel'); } catch (e) { duel.phase = 'failed'; return; }
+  try { duelWs = new WebSocket('ws://' + duel.host + '/' + mode); } catch (e) { duel.phase = 'failed'; return; }
   duelWs.onopen = () => duelSend({ t: 'hello', name });
   duelWs.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    for (const u of duelReceive(duel, game, m, performance.now() / 1000)) duelEvent(u);
+    const now = performance.now() / 1000;
+    if (duel.mode === 'escort') {
+      const r = escortReceive(duel, game, m, now);
+      escortEvents.push(...r.ev);
+      r.ui.forEach(duelEvent);
+    } else for (const u of duelReceive(duel, game, m, now)) duelEvent(u);
   };
   duelWs.onclose = () => { if (duel) duel.phase = duel.phase === 'connecting' ? 'failed' : 'disconnected'; };
 }
@@ -141,7 +149,16 @@ function duelEvent(u) {
     // Every round starts with a calibration (centre, then range): nobody can pause mid-fight.
     if (mode === 'camera') startCalibration(CONFIG.CALIB_COUNTDOWN);
     else duelReady();
-  } else if (u.type === 'go') { calib = null; SFX.calib(); }
+  } else if (u.type === 'go') {
+    calib = null;
+    SFX.calib();
+    if (duel.mode === 'escort') flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers' : 'ESCORT — keep the 109 off the bombers', game.team === 'attacker' ? HUD.red : HUD.cyan);
+  } else if (u.type === 'escort-over') {
+    const mine = u.winner === game.team;
+    const why = { bombers: CONFIG.ESCORT_KILLS + ' bombers down', time: 'the bombers reached the target', shot: 'the 109 was shot down ' + CONFIG.ESCORT_LIVES + ' times', left: 'the 109 left' }[u.why] || '';
+    duel.result = { text: (u.winner === 'attacker' ? 'THE 109 WINS' : 'THE ESCORTS WIN') + (mine ? ' — YOU WIN' : ''), sub: why + ' · Enter for the next mission (the 109 passes on)', color: mine ? HUD.green : HUD.red };
+    SFX.kill();
+  }
   else if (u.type === 'round' && u.draw) duel.result = { text: 'TIME — NO POINT', sub: 'nobody went down in ' + Math.round(CONFIG.DUEL_ROUND_TIME / 60) + ' minutes', color: HUD.amber };
   else if (u.type === 'round') duel.result = { text: u.won ? 'ROUND TO YOU' : 'ROUND TO ' + them.toUpperCase(), sub: u.how === 'crash' ? (u.won ? them + ' flew into the ground' : 'you flew into the ground') : '', color: u.won ? HUD.green : HUD.red };
   else if (u.type === 'over') duel.result = { text: u.won ? 'YOU WIN THE DUEL' : them.toUpperCase() + ' WINS THE DUEL', sub: 'Enter for a rematch', color: u.won ? HUD.green : HUD.red };
@@ -297,8 +314,14 @@ function frame(ts) {
   else game.events.length = 0;
   if (duel) {
     duelRemoteStep(duel, game, now, dt);
+    if (duel.mode === 'escort') {
+      escortStep(duel, game, dt);
+      game.events.push(...escortEvents);
+      escortEvents = [];
+    }
     for (const e of game.events) {
-      if (e.type === 'duel-hit') { duelSend({ t: 'hit', dmg: e.dmg }); SFX.hit(); }
+      if (e.type === 'bomber-hit') duelSend({ t: 'bhit', id: e.id, part: e.part, dmg: e.dmg });
+      if (e.type === 'duel-hit') { duelSend({ t: 'hit', dmg: e.dmg, to: e.to }); SFX.hit(); }
       if (e.type === 'shot-down' || e.type === 'crash') duelSend({ t: 'down', how: e.type === 'crash' ? 'crash' : 'shot' });
     }
     duel.sendAcc += dt;
@@ -311,7 +334,8 @@ function frame(ts) {
     if (e.type === 'missile') { SFX.missile(); missileFlash = 0.4; }
     if (e.type === 'kill') {
       SFX.kill();
-      if (e.bomber) flash(e.how === 'fire' ? 'BOMBER DOWN — BURNED OUT' : 'SPLASH ONE — BOMBER DOWN', HUD.green);
+      if (e.bomber && game.mode === 'escort') flash(game.team === 'attacker' ? 'BOMBER DOWN' : 'WE LOST A BOMBER', game.team === 'attacker' ? HUD.green : HUD.red);
+      else if (e.bomber) flash(e.how === 'fire' ? 'BOMBER DOWN — BURNED OUT' : 'SPLASH ONE — BOMBER DOWN', HUD.green);
       else flash(e.bandit ? (e.how === 'crashed' ? SKILLS[e.skill].name + ' FLEW INTO THE GROUND' : 'SPLASH ONE — ' + SKILLS[e.skill].name + ' DOWN') : 'SPLASH ONE', HUD.green);
     }
     if (e.type === 'bomber') flash('BOMBER — crossing ahead', HUD.amber);
@@ -479,7 +503,7 @@ async function start(useCamera, duelOpts) {
   resize();
   showScreen(null);
   document.body.classList.toggle('debug', debug);
-  if (duelOpts) duelConnect(duelOpts.name, duelOpts.host);
+  if (duelOpts) duelConnect(duelOpts.name, duelOpts.host, duelOpts.mode);
   else if (useCamera && !isCalibrated(settings)) startCalibration();
   requestAnimationFrame(frame);
 }
@@ -525,6 +549,8 @@ if (location.protocol === 'https:') {
 } else {
   document.getElementById('btn-duel-cam').addEventListener('click', () => start(true, duelOptsFromForm()));
   document.getElementById('btn-duel-keys').addEventListener('click', () => start(false, duelOptsFromForm()));
+  document.getElementById('btn-escort-cam').addEventListener('click', () => start(true, { ...duelOptsFromForm(), mode: 'escort' }));
+  document.getElementById('btn-escort-keys').addEventListener('click', () => start(false, { ...duelOptsFromForm(), mode: 'escort' }));
 }
 
 const PREVENT = ['Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'];

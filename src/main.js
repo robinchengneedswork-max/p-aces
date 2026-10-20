@@ -22,6 +22,8 @@ let flashes = [];
 let missileFlash = 0;
 let hurtFlash = 0, warnT = 0;   // red edge flash when hit; time to the next warning tone
 let lockTickT = 0;
+let duel = null;               // 1v1 LAN duel state (duel.js), or null
+let duelWs = null;             // its WebSocket to the host laptop
 let drawAcc = 0;               // anime look: time banked toward the next 24 fps picture
 let sinceDraw = 0;             // time since the last picture (what the renderer animates by)
 let pendingEvents = [];        // game events since the last picture (explosions mustn't be skipped)
@@ -77,6 +79,7 @@ function flash(text, color) {
 
 function startCalibration(seconds) {
   if (mode !== 'camera') return;
+  if (duel && duel.phase !== 'calib') { flash('NO PAUSING IN A DUEL — you calibrate before each round', HUD.amber); return; }
   calib = { phase: 'centre', left: seconds || CONFIG.CALIB_COUNTDOWN };
   SFX.calib();
 }
@@ -85,12 +88,55 @@ function startCalibration(seconds) {
 function finishRange(skip) {
   const sweep = calib.sweep;
   calib = null;
-  if (skip) { flash('RANGE SKIPPED — kept the previous range', HUD.dim); return; }
+  if (skip) { flash('RANGE SKIPPED — kept the previous range', HUD.dim); duelReady(); return; }
   const set = rangeSweepFinish(sweep, settings);
   controls = createControls();
   saveSettings();
   SFX.ring();
   flash(set.length ? 'RANGE SET: ' + set.join(', ') : 'NO MOVEMENT SEEN — range unchanged', set.length ? HUD.green : HUD.amber);
+  duelReady();
+}
+
+// ---- Duel (two laptops on the same Wi-Fi) ----
+// Each laptop runs its own Sky Ace on localhost (the camera needs it) and connects here to the
+// host laptop's server. host '' = this laptop hosts.
+function duelConnect(name, host) {
+  duel = createDuel(name);
+  game = createGame(Date.now() % 100000, 'duel');
+  const addr = (host || 'localhost').trim().replace(/^\w+:\/\//, '').replace(/\/.*$/, '');
+  duel.host = addr.includes(':') ? addr : addr + ':8068';
+  try { duelWs = new WebSocket('ws://' + duel.host + '/duel'); } catch (e) { duel.phase = 'failed'; return; }
+  duelWs.onopen = () => duelSend({ t: 'hello', name });
+  duelWs.onmessage = ev => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    for (const u of duelReceive(duel, game, m, performance.now() / 1000)) duelEvent(u);
+  };
+  duelWs.onclose = () => { if (duel) duel.phase = duel.phase === 'connecting' ? 'failed' : 'disconnected'; };
+}
+
+function duelSend(m) {
+  if (duelWs && duelWs.readyState === 1) duelWs.send(JSON.stringify(m));
+}
+
+function duelReady() {
+  if (!duel || duel.phase !== 'calib' || duel.ready) return;
+  duel.ready = true;
+  duelSend({ t: 'ready' });
+}
+
+function duelEvent(u) {
+  const op = duelOpponent(duel), them = op ? op.name : 'OPPONENT';
+  if (u.type === 'calib') {
+    flash('ROUND ' + u.round + ' — CALIBRATE', HUD.amber);
+    // Every round starts with a calibration (centre, then range): nobody can pause mid-fight.
+    if (mode === 'camera') startCalibration(CONFIG.CALIB_COUNTDOWN);
+    else duelReady();
+  } else if (u.type === 'go') { calib = null; SFX.calib(); }
+  else if (u.type === 'round') duel.result = { text: u.won ? 'ROUND TO YOU' : 'ROUND TO ' + them.toUpperCase(), sub: u.how === 'crash' ? (u.won ? them + ' flew into the ground' : 'you flew into the ground') : '', color: u.won ? HUD.green : HUD.red };
+  else if (u.type === 'over') duel.result = { text: u.won ? 'YOU WIN THE DUEL' : them.toUpperCase() + ' WINS THE DUEL', sub: 'Enter for a rematch', color: u.won ? HUD.green : HUD.red };
+  else if (u.type === 'left') flash(them.toUpperCase() + ' LEFT — waiting for an opponent', HUD.amber);
+  else if (u.type === 'full') flash('THAT DUEL IS FULL (two pilots already)', HUD.red);
 }
 
 // Calibrates whatever it can see: the flying hand's centre and, if a face is visible, "forward".
@@ -233,8 +279,19 @@ function frame(ts) {
 
   // The game pauses while recording or calibrating, so nobody crashes into a hill holding
   // "push forward" or spins while their hand finds the stick again.
-  if (!recorder && !calib) gameUpdate(game, ctrl, dt);
+  const duelHold = duel && !duelFlying(duel);
+  if (duel && duel.phase === 'fight' && duel.countdown > 0) duel.countdown -= dt;
+  if (!recorder && !calib && !duelHold) gameUpdate(game, ctrl, dt);
   else game.events.length = 0;
+  if (duel) {
+    duelRemoteStep(duel, game, now, dt);
+    for (const e of game.events) {
+      if (e.type === 'duel-hit') { duelSend({ t: 'hit', dmg: e.dmg }); SFX.hit(); }
+      if (e.type === 'shot-down' || e.type === 'crash') duelSend({ t: 'down', how: e.type === 'crash' ? 'crash' : 'shot' });
+    }
+    duel.sendAcc += dt;
+    if (duel.sendAcc >= 1 / CONFIG.DUEL_SEND_HZ) { duel.sendAcc = 0; duelSend(duelSnapshot(game, ctrl.gun && !duelHold)); }
+  }
   pendingEvents.push(...game.events);
   for (const e of game.events) {
     if (e.type === 'gun') SFX.gun();
@@ -298,7 +355,7 @@ function frame(ts) {
   else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
   if (draw) drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
-    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash,
+    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash, duel,
     status: camera ? statusLine() : '',
     perf: perfLine(camera),
   });
@@ -372,7 +429,7 @@ function showScreen(id) {
   if (id) document.getElementById(id).classList.add('active');
 }
 
-async function start(useCamera) {
+async function start(useCamera, duelOpts) {
   ac();
   const msg = document.getElementById('start-msg');
   if (useCamera) {
@@ -392,7 +449,8 @@ async function start(useCamera) {
   resize();
   showScreen(null);
   document.body.classList.toggle('debug', debug);
-  if (useCamera && !isCalibrated(settings)) startCalibration();
+  if (duelOpts) duelConnect(duelOpts.name, duelOpts.host);
+  else if (useCamera && !isCalibrated(settings)) startCalibration();
   requestAnimationFrame(frame);
 }
 
@@ -407,6 +465,27 @@ function toggle(key, a, b, text) {
 document.getElementById('btn-camera').addEventListener('click', () => start(true));
 document.getElementById('btn-keys').addEventListener('click', () => start(false));
 
+// Duel start: name + host address (blank = this laptop hosts), remembered for next time.
+function duelOptsFromForm() {
+  const name = document.getElementById('duel-name').value.trim() || 'Pilot';
+  const host = document.getElementById('duel-host').value.trim();
+  try { localStorage.setItem('sky-ace-duel', JSON.stringify({ name, host })); } catch (e) { /* private window */ }
+  return { name, host };
+}
+try {
+  const saved = JSON.parse(localStorage.getItem('sky-ace-duel'));
+  if (saved) { document.getElementById('duel-name').value = saved.name || ''; document.getElementById('duel-host').value = saved.host || ''; }
+} catch (e) { /* nothing saved */ }
+// From https (the Vercel site) a browser won't open a plain ws:// connection to a laptop, and the
+// camera needs localhost: duels only work from a local copy started with start.bat / start.command.
+if (location.protocol === 'https:') {
+  document.querySelector('.duel-box').innerHTML = '<p class="small"><b>Duels</b> run from a local copy: download the game, run start.bat '
+    + '(Windows) or start.command (Mac), and pick Duel there. Browsers block this site from talking to a laptop on your Wi-Fi.</p>';
+} else {
+  document.getElementById('btn-duel-cam').addEventListener('click', () => start(true, duelOptsFromForm()));
+  document.getElementById('btn-duel-keys').addEventListener('click', () => start(false, duelOptsFromForm()));
+}
+
 const PREVENT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'];
 window.addEventListener('keydown', e => {
   if (PREVENT.includes(e.code)) e.preventDefault();
@@ -416,10 +495,14 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyD') { debug = !debug; document.body.classList.toggle('debug', debug); }
   if (e.code === 'KeyC') startCalibration();
   if (e.code === 'Escape') { if (calib && calib.phase === 'range') finishRange(true); calib = null; if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); } }
-  if (e.code === 'KeyG') startRecording();
+  if (e.code === 'KeyG' && !duel) startRecording();
   if (e.code === 'KeyV') world.view = world.view === 'chase' ? 'cockpit' : 'chase';
-  if (e.code === 'KeyR') { game = createGame(Date.now() % 100000, game.mode); flash('RESET', HUD.ink); }
-  if (e.code === 'KeyB') {
+  if (e.code === 'Enter' && duel) {
+    if (duel.phase === 'calib') { calib = null; duelReady(); }
+    if (duel.phase === 'over') duelSend({ t: 'rematch' });
+  }
+  if (e.code === 'KeyR' && !duel) { game = createGame(Date.now() % 100000, game.mode); flash('RESET', HUD.ink); }
+  if (e.code === 'KeyB' && !duel) {
     game = createGame(Date.now() % 100000, game.mode === 'range' ? 'dogfight' : 'range');
     flash(game.mode === 'dogfight' ? 'DOGFIGHT — bandits incoming' : 'TEST RANGE', HUD.ink);
   }

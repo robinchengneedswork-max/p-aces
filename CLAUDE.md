@@ -9,8 +9,9 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (181 checks, synthetic hands,
-no camera) and `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min).
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (191 checks, synthetic hands,
+no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
+and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -244,3 +245,29 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   turn 0.6, missiles 1.04 / 0.88, vapour thresholds), with A_PER_G and SLIP_GRIP × 0.8 so a full
   pull still reads ~9 G and slips ~7°. Speeds, FOV and roll rate untouched. BREAK_DIST re-swept →
   950-1450 m (AI dodge ideal 1200). Fights run longer (bandit life vs a shooting regular 31/72/150 s).
+- **Round 16 (2026-10-19): LAN 1v1 duel.** User: "two people on two laptops on the same wifi" →
+  1v1, guns + missiles, "slightly further range but lower", recalibrate every round ("in a duel you
+  can't pause"). Also asked for Mac support.
+  - **Each laptop runs its own copy on localhost** (start.bat / start.command): getUserMedia needs a
+    secure origin, so the guest can't just open the host's http://172.16.x.x page; and the Vercel
+    https site can't open ws:// to a LAN address (mixed content), so duels are local-copy only
+    (the https start screen says so). serve.js now listens on 0.0.0.0 (firewall prompt) but serves
+    recordings/POST only to localhost.
+  - `duel-server.js`: hand-written WebSocket (RFC 6455 handshake + text frames, no npm) + the round
+    referee: lobby → calib (both calibrate) → both ready → go {spawns 7 km apart nose to nose, 3 km
+    above ground, new spot each round} → 3 s countdown → fight → `down` (shot or crash) → point to
+    the other → calib again; first to 5 → over → rematch. Downs during the countdown are ignored.
+    LAN address picked like Endor (routed adapter wins over the 192.168.137.x hotspot).
+  - `src/duel.js` (pure): each laptop flies its own plane and sends a snapshot 30×/s (pos, nose,
+    canopy, speed, hp, firing, its missiles); the other plane is drawn 0.1 s in the past between two
+    snapshots (extrapolated ≤0.35 s if they stall). **Shooter decides hits** (game.js 'duel-hit'
+    events → `hit` messages; DUEL_HIT_R 12 both ways, 5 per round, 45 per missile). Remote missiles
+    only raise your warning; remote tracers are looks only. No respawn in a duel.
+  - Calibration in a duel: auto-starts on each `calib` (keyboard players auto-ready; Enter = ready /
+    rematch); C/clap mid-round is refused. R/B/G disabled in a duel.
+  - Verified: 191 headless (incl. two games back to back with simulated latency), 20 server checks
+    over real sockets, and two headless Edge pages, the guest joining via the real Wi-Fi address
+    (172.16.185.115): lobby shows the address, both auto-ready, countdown, the guest's plane closes,
+    20 hits → round to the host, round 2 calibrates. Background tabs throttle rAF in one headless
+    browser (test-only). **Not yet played on two real laptops / a Mac.**
+  - Mac: `start.command` (LF endings forced by .gitattributes, mode 755 in git); needs Node + Chrome.

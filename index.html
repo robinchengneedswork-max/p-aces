@@ -32,6 +32,19 @@
       <button id="btn-camera">Start camera</button>
       <button id="btn-keys" class="ghost">Keyboard only</button>
     </div>
+    <div class="duel-box">
+      <p><b>Duel a friend on the same Wi-Fi.</b> Both laptops run Sky Ace (start.bat on Windows,
+        start.command on a Mac). One hosts and leaves the address blank; the other types the address the
+        host's screen shows. First to 5 kills; you both calibrate before every round.</p>
+      <div class="duel-fields">
+        <input id="duel-name" placeholder="Your name" maxlength="16">
+        <input id="duel-host" placeholder="Host address (blank = I host)">
+      </div>
+      <div class="buttons">
+        <button id="btn-duel-cam">Duel with camera</button>
+        <button id="btn-duel-keys" class="ghost">Duel with keyboard</button>
+      </div>
+    </div>
     <p id="start-msg" class="small"></p>
   </div>
 </div>
@@ -45,6 +58,7 @@
 <script src="src/head.js"></script>
 <script src="src/recorder.js"></script>
 <script src="src/game.js"></script>
+<script src="src/duel.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>

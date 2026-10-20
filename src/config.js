@@ -99,6 +99,12 @@ const CONFIG = {
   BANDIT_SPAWN_DIST: 3500,
   WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
+  // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal
+  DUEL_HIT_R: 12,            // gun hit radius on the other human's plane (same both ways)
+  DUEL_SEND_HZ: 30,          // state updates per second to the other laptop
+  DUEL_INTERP: 0.1,          // draw their plane this far in the past (s), between two updates…
+  DUEL_EXTRAP_MAX: 0.35,     // …or guess ahead from its velocity for up to this long if updates stall
+
   // Hands → controls
   HAND_LOST_HOLD: 0.3,       // seconds to hold the last input after a hand vanishes
   STICK_LOST_HOLD: 0.6,      // a fist at an odd angle drops out more; hold it longer

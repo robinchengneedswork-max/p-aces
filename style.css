@@ -23,3 +23,8 @@ body.debug #panel, body.debug #keys { display: block; }
 .slider-row b { color: #ffd34a; }
 .slider-row input { grid-column: 1 / -1; width: 100%; }
 #keys { top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 12px; color: #7d8799; white-space: nowrap; }
+
+.duel-box { margin-top: 24px; padding-top: 16px; border-top: 1px solid #2a3140; }
+.duel-fields { display: flex; gap: 8px; flex-wrap: wrap; }
+.duel-fields input { flex: 1 1 180px; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3140; background: #0b0d12; color: #e8ecf3; }
+.card { max-height: calc(100vh - 32px); overflow-y: auto; }

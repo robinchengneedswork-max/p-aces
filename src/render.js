@@ -299,6 +299,7 @@ function makeCockpit() {
 }
 
 const BANDIT_PAINT = { body: 0x8a5a58, dark: 0x3a2426 };
+const DUEL_PAINT = { body: 0x5a6f9a, dark: 0x23304a };
 
 function makeDroneModel() {
   const g = new THREE.Group();
@@ -466,10 +467,12 @@ function renderWorld(w, g, dt, now, look, ctrl) {
 
   // Bandits: same as drones, plane models flown by ai.js.
   const flying = new Set();
-  for (const b of g.bandits || []) {
+  // The duel opponent is drawn the same way, in its own colours.
+  const others = (g.bandits || []).concat(g.remote && g.remote.alive ? [g.remote] : []);
+  for (const b of others) {
     flying.add(b.id);
     let m = w.bandits.get(b.id);
-    if (!m) { m = makePlaneModel(BANDIT_PAINT); styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m); }
+    if (!m) { m = makePlaneModel(b.kind === 'remote' ? DUEL_PAINT : BANDIT_PAINT); styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m); }
     m.position.copy(tv(b.plane.pos));
     setBasis(m, b.plane.fwd, b.plane.up);
     m.userData.flame.scale.set(1, 1, 0.4 + b.plane.throttle * 1.2 + Math.random() * 0.15);
@@ -518,7 +521,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
 
   for (const e of g.events) {
     if (e.type === 'kill') addBoom(w, e.pos, e.bandit ? 60 : 40);
-    if (e.type === 'hit') addBoom(w, e.pos, 6);
+    if (e.type === 'hit' || e.type === 'duel-hit') addBoom(w, e.pos, 6);
     if (e.type === 'shot-down') addBoom(w, e.pos, 70);
     if (e.type === 'boom') addBoom(w, e.pos, 25);
     if (e.type === 'crash') addBoom(w, e.pos, 70);

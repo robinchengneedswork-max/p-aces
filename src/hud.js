@@ -52,8 +52,9 @@ function drawHud(ctx, W, H, st) {
   ctx.font = '16px ' + HUD.font;
   ctx.fillText('SCORE ' + String(g.score).padStart(6, '0'), 20, 24);
   ctx.font = '13px ' + HUD.font;
-  if (g.mode === 'dogfight') {
-    ctx.fillText('DOGFIGHT · WAVE ' + g.wave + '   KILLS ' + g.kills + '   SHOT DOWN ' + g.deaths + '   CRASHES ' + g.crashes, 20, 46);
+  if (g.mode === 'duel' || g.mode === 'dogfight') {
+    if (g.mode === 'duel') ctx.fillText('DUEL · ROUND ' + (st.duel ? st.duel.round : 0) + '   first to ' + (st.duel ? st.duel.target : 5), 20, 46);
+    else ctx.fillText('DOGFIGHT · WAVE ' + g.wave + '   KILLS ' + g.kills + '   SHOT DOWN ' + g.deaths + '   CRASHES ' + g.crashes, 20, 46);
     // Your HP.
     const k = g.hp / CONFIG.PLAYER_HP;
     ctx.strokeStyle = HUD.green;
@@ -77,9 +78,11 @@ function drawHud(ctx, W, H, st) {
     ctx.fillText(f.text, W / 2, H * 0.24 + i * 32);
   });
   ctx.globalAlpha = 1;
+  if (st.duel) drawDuelScore(ctx, W, H, st);
 
   if (st.recorder) drawRecorder(ctx, W, H, st);
-  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, 'respawning…');
+  else if (st.duel && !st.calib && duelOverlay(ctx, W, H, st)) { /* duel screen drawn */ }
+  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
   else if (st.calib && st.calib.phase === 'range') drawRangeSweep(ctx, W, H, st);
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
@@ -287,7 +290,7 @@ function drawFlightPath(ctx, W, H, st) {
 // Bandits: a red diamond, name + health, and an edge arrow when off screen.
 function drawBandits(ctx, W, H, st) {
   const g = st.game, w = st.world;
-  for (const b of g.bandits) {
+  for (const b of g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [])) {
     const s = projectToScreen(w, b.pos, W, H);
     const dist = vDist(b.pos, g.plane.pos);
     if (!s.on) { edgeArrow(ctx, W, H, s, HUD.red); continue; }
@@ -305,10 +308,38 @@ function drawBandits(ctx, W, H, st) {
     ctx.fillStyle = HUD.red;
     ctx.font = '11px ' + HUD.font;
     ctx.textAlign = 'left';
-    ctx.fillText((locked ? 'LOCK ' : '') + SKILLS[b.skill].name + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
-    ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / b.maxHp), 3);
+    const label = b.kind === 'remote' ? b.name.toUpperCase() : SKILLS[b.skill].name;
+    ctx.fillText((locked ? 'LOCK ' : '') + label + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
+    ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / (b.maxHp || CONFIG.PLAYER_HP)), 3);
   }
   ctx.lineWidth = 1.5;
+}
+
+// Duel: the score along the top, you first.
+function drawDuelScore(ctx, W, H, st) {
+  const d = st.duel, me = duelMe(d), op = duelOpponent(d);
+  if (!me) return;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 20px ' + HUD.font;
+  ctx.fillStyle = HUD.green;
+  ctx.fillText(me.name.toUpperCase() + '  ' + me.score + ' — ' + (op ? op.score : 0) + '  ' + (op ? op.name.toUpperCase() : '…'), W / 2, 70);
+}
+
+// Duel screens between the fighting: connecting, waiting, ready, countdown, round/match result.
+// Returns true when it drew something (so the crash text doesn't draw on top).
+function duelOverlay(ctx, W, H, st) {
+  const d = st.duel, op = duelOpponent(d), them = op ? op.name : 'your opponent';
+  if (d.phase === 'connecting') bigText(ctx, W, H, 'CONNECTING', HUD.amber, 'to ' + d.host);
+  else if (d.phase === 'failed') bigText(ctx, W, H, "COULDN'T CONNECT", HUD.red, 'Is Sky Ace running on ' + d.host + ' and on the same Wi-Fi? (Windows may ask to let Node through its firewall.)');
+  else if (d.phase === 'disconnected') bigText(ctx, W, H, 'DISCONNECTED', HUD.red, 'The host stopped. Reload to start again.');
+  else if (d.phase === 'lobby') bigText(ctx, W, H, 'WAITING FOR AN OPPONENT', HUD.amber,
+    d.host.startsWith('localhost') ? 'On the other laptop: Duel → host address  ' + (d.lan[0] || '(this laptop\'s IP)') : 'Connected to ' + d.host);
+  else if (d.phase === 'calib') bigText(ctx, W, H, d.ready ? 'READY' : 'CALIBRATE', HUD.amber,
+    d.ready ? 'Waiting for ' + them + ' to finish calibrating' : 'Press C (or clap twice) to calibrate, Enter if you\'re set');
+  else if (d.phase === 'fight' && d.countdown > 0) bigText(ctx, W, H, String(Math.ceil(d.countdown)), HUD.amber, 'ROUND ' + d.round + ' — ' + them + ' is 7 km ahead, nose to nose');
+  else if ((d.phase === 'roundEnd' || d.phase === 'over') && d.result) bigText(ctx, W, H, d.result.text, d.result.color, d.result.sub);
+  else return false;
+  return true;
 }
 
 // Off-screen marker: an arrow on a circle round the middle, pointing toward it.

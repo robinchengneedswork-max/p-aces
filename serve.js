@@ -1,11 +1,14 @@
 // serve.js — tiny static server. Camera access needs a secure context; localhost counts.
 // MediaPipe fetches its .wasm and model, which file:// can't do.
 // POST /recordings saves a gesture recording (G in the game) to recordings/ for
-// tools/analyze-recording.js.
+// tools/analyze-recording.js. /duel is the WebSocket for 1v1 LAN duels (duel-server.js): the
+// server listens on the network so the other laptop's game can connect to it (Windows Firewall
+// asks once). Each laptop still opens its OWN copy on localhost: the camera needs a secure origin.
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { attachDuel } = require('./duel-server');
 
 const PORT = 8068;
 const ROOT = __dirname;
@@ -37,11 +40,14 @@ function saveRecording(req, res) {
   });
 }
 
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (req.method === 'POST' && urlPath === '/recordings') { saveRecording(req, res); return; }
   const file = path.join(ROOT, urlPath === '/' ? 'index.html' : urlPath);
   if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+  // Listening on the network now: other machines get the game only, not the recordings.
+  const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  if (!local && (file.startsWith(RECORDINGS) || req.method === 'POST')) { res.writeHead(403); res.end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
     // no-store: during development the browser must never mix cached old modules with new ones
@@ -49,4 +55,9 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   });
-}).listen(PORT, '127.0.0.1', () => console.log('Sky Ace → http://localhost:' + PORT + '/'));
+});
+const duel = attachDuel(server);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('Sky Ace → http://localhost:' + PORT + '/');
+  setTimeout(() => { if (duel.lan.length) console.log('Duel: the other laptop joins ' + duel.lan[0]); }, 1000);
+});

@@ -1,6 +1,8 @@
-// game.js — two modes. 'range': drones to shoot and a chain of rings to fly through.
+// game.js — three modes. 'range': drones to shoot and a chain of rings to fly through.
 // 'dogfight' (B): one bandit at a time, flown by ai.js, that shoots back; rookies, then regulars,
-// then aces. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events for audio/render.
+// then aces. 'duel': a human on another laptop (g.remote, kept up to date by duel.js); your hits on
+// them become 'duel-hit' events for main.js to send, theirs arrive as messages. No respawn there:
+// the duel server starts each round. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
 //
 // Bullets and missiles carry an owner ('player' or a bandit id) and hit only the other side.
 // Things a missile can chase are { pos, vel, alive }: drones, bandits, and g.player (you).
@@ -19,6 +21,7 @@ function createGame(seed, mode) {
     missiles: [],
     drones: [],
     bandits: [],
+    remote: null,                           // duel: the other laptop's plane (duel.js)
     ring: null,
     gunAcc: 0,
     missileCd: 0,
@@ -100,7 +103,7 @@ function placeRing(g) {
 }
 
 function lockables(g) {
-  return g.drones.concat(g.bandits).filter(t => t.alive);
+  return g.drones.concat(g.bandits, g.remote ? [g.remote] : []).filter(t => t.alive);
 }
 
 function updateLock(g, dt) {
@@ -187,7 +190,7 @@ function gameUpdate(g, ctrl, dt) {
       g.events.push({ type: p.shotDown ? 'shot-down' : 'crash', pos: p.pos });
     }
     g.respawnT += dt;
-    if (g.respawnT >= CONFIG.RESPAWN_TIME) respawnPlayer(g);
+    if (g.respawnT >= CONFIG.RESPAWN_TIME && g.mode !== 'duel') respawnPlayer(g);
   } else {
     const before = p.pos;
     flightStep(p, ctrl, dt, ctrl.assist);
@@ -207,7 +210,7 @@ function gameUpdate(g, ctrl, dt) {
     if (ctrl.missile && g.missileCd === 0) {
       g.missileCd = CONFIG.MISSILE_COOLDOWN;
       const target = g.lock.locked ? g.lock.target : null;
-      g.missiles.push({ pos: vAdd(p.pos, vScale(p.up, -3)), dir: p.fwd, speed: p.speed + 40, target, age: 0, owner: 'player', turn: CONFIG.MISSILE_TURN });
+      g.missiles.push({ id: g.nextId++, pos: vAdd(p.pos, vScale(p.up, -3)), dir: p.fwd, speed: p.speed + 40, target, age: 0, owner: 'player', turn: CONFIG.MISSILE_TURN });
       g.events.push({ type: 'missile', pos: p.pos });
     }
   }
@@ -309,6 +312,13 @@ function updateBullets(g, dt) {
       for (const t of g.bandits) {
         if (t.alive && segPointDist(prev, b.pos, t.pos) < CONFIG.BANDIT_R) { hitBandit(g, t, 1, 'gun'); b.age = 99; break; }
       }
+      const R = g.remote;
+      if (b.age < 99 && R && R.alive && segPointDist(prev, b.pos, R.pos) < CONFIG.DUEL_HIT_R) {
+        g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG, pos: b.pos });
+        b.age = 99;
+      }
+    } else if (b.owner === 'remote') {
+      // The other laptop's rounds: drawn here, but only their laptop decides what they hit.
     } else if (g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < CONFIG.PLANE_HIT_R) {
       hurtPlayer(g, CONFIG.BANDIT_GUN_DMG, b.pos);
       b.age = 99;
@@ -321,6 +331,14 @@ function updateBullets(g, dt) {
 function updateMissiles(g, dt) {
   g.warn.missile = null;
   for (const m of g.missiles) {
+    if (m.remote) {
+      // Flown by the other laptop (duel.js moves it); here it only raises your warning.
+      if (m.tracking && g.player.alive) {
+        const tti = missileTti(m, g.plane.pos, g.player.vel);
+        if (!g.warn.missile || tti < g.warn.missile.tti) g.warn.missile = { pos: m.pos, tti, dist: vDist(m.pos, g.plane.pos) };
+      }
+      continue;
+    }
     const prev = m.pos;
     m.age += dt;
     m.speed = Math.min(CONFIG.MISSILE_SPEED + 180, m.speed + 300 * dt);
@@ -339,6 +357,11 @@ function updateMissiles(g, dt) {
     if (m.owner === 'player') {
       for (const d of g.drones) {
         if (d.alive && segPointDist(prev, m.pos, d.pos) < CONFIG.DRONE_R * 1.5) { killDrone(g, d, 'missile'); m.age = 99; break; }
+      }
+      const R = g.remote;
+      if (R && R.alive && m.age < 99 && segPointDist(prev, m.pos, R.pos) < CONFIG.MISSILE_FUSE) {
+        g.events.push({ type: 'duel-hit', dmg: CONFIG.ENEMY_MISSILE_DMG, pos: m.pos }, { type: 'boom', pos: m.pos });
+        m.age = 99;
       }
       for (const t of g.bandits) {
         if (t.alive && segPointDist(prev, m.pos, t.pos) < CONFIG.MISSILE_FUSE) {
@@ -360,5 +383,5 @@ function updateMissiles(g, dt) {
     }
     if (m.pos.y < groundHeight(m.pos.x, m.pos.z)) { m.age = 99; g.events.push({ type: 'boom', pos: m.pos }); }
   }
-  g.missiles = g.missiles.filter(m => m.age < CONFIG.MISSILE_LIFE);
+  g.missiles = g.missiles.filter(m => m.remote || m.age < CONFIG.MISSILE_LIFE);
 }

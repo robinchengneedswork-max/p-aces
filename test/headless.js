@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -745,6 +745,77 @@ console.log('dogfight');
   for (let i = 0; i < 60; i++) X.gameUpdate(g4, { ...ctrl0, gun: true }, 1 / 60);
   check('your own rounds never hurt you', g4.hp === CONFIG.PLAYER_HP);
   check('range mode still has drones and rings', X.createGame(7).drones.length > 0 && !!X.createGame(7).ring);
+}
+
+console.log('duel (two laptops, in one process)');
+{
+  // Two games wired back to back: what one sends, the other receives LAT seconds later.
+  const LAT = 0.02, DT = 1 / 60;
+  const A = { g: X.createGame(1, 'duel'), d: X.createDuel('Ann') }, B = { g: X.createGame(2, 'duel'), d: X.createDuel('Bob') };
+  const wire = [];
+  let now = 0;
+  const deliver = (to, m) => wire.push({ at: now + LAT, to, m });
+  const players = [{ id: 1, name: 'Ann', score: 0, ready: true }, { id: 2, name: 'Bob', score: 0, ready: true }];
+  X.duelReceive(A.d, A.g, { t: 'welcome', id: 1, lan: [], target: 5 }, 0);
+  X.duelReceive(B.d, B.g, { t: 'welcome', id: 2, lan: [], target: 5 }, 0);
+  for (const P of [A, B]) X.duelReceive(P.d, P.g, { t: 'room', phase: 'fight', round: 1, players }, 0);
+  // Nose to nose 7 km apart over the sea-level-ish spot, then a 0.5 s countdown.
+  const spawns = { 1: { x: 0, z: 3500, hx: 0, hz: -1, alt: 3000 }, 2: { x: 0, z: -3500, hx: 0, hz: 1, alt: 3000 } };
+  for (const P of [A, B]) X.duelReceive(P.d, P.g, { t: 'go', round: 1, spawns, countdown: 0.5 }, 0);
+  check('both planes spawn 7 km apart, nose to nose', Math.abs(X.vDist(A.g.plane.pos, B.g.plane.pos) - 7000) < 600 && X.vDot(A.g.plane.fwd, B.g.plane.fwd) < -0.99);
+  const ctrl0 = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false, assist: false };
+  const step = (ctrlA, ctrlB) => {
+    now += DT;
+    for (const [P, c] of [[A, ctrlA], [B, ctrlB]]) {
+      if (P.d.countdown > 0) P.d.countdown -= DT;
+      if (X.duelFlying(P.d)) X.gameUpdate(P.g, c, DT); else P.g.events.length = 0;
+      for (const e of P.g.events) if (e.type === 'duel-hit') deliver(P === A ? B : A, { t: 'hit', dmg: e.dmg });
+      deliver(P === A ? B : A, X.duelSnapshot(P.g, c.gun));
+    }
+    for (const w of wire.filter(w => w.at <= now)) X.duelReceive(w.to.d, w.to.g, w.m, now);
+    wire.splice(0, wire.length, ...wire.filter(w => w.at > now));
+    for (const P of [A, B]) X.duelRemoteStep(P.d, P.g, now, DT);
+  };
+  const startA = { ...A.g.plane.pos };
+  for (let i = 0; i < 20; i++) step(ctrl0, ctrl0);
+  check('nobody moves during the countdown', X.vDist(A.g.plane.pos, startA) < 1e-6);
+  let worst = 0;
+  for (let i = 0; i < 120; i++) {
+    step({ ...ctrl0, roll: 0.3 }, ctrl0);
+    if (i > 20) worst = Math.max(worst, X.vDist(B.g.remote.pos, A.g.plane.pos));
+  }
+  // Drawn ~0.1 s in the past at ~175 m/s ≈ 17 m behind, plus latency.
+  check("each laptop draws the other's plane close behind where it really is", worst < 30, worst.toFixed(1) + ' m');
+  check('…and can lock it like a bandit', B.g.remote && B.g.remote.alive && B.g.remote.name === 'Ann');
+  // Park Bob 300 m in front of Ann and let Ann shoot: Ann's laptop scores the hits, Bob's loses HP.
+  const pa = A.g.plane;
+  const pb = B.g.plane;
+  pb.pos = X.vAdd(pa.pos, X.vScale(pa.fwd, 300)); pb.fwd = { ...pa.fwd }; pb.up = { ...pa.up }; pb.right = { ...pa.right }; pb.path = { ...pa.path }; pb.speed = pa.speed;
+  for (let i = 0; i < 12; i++) step(ctrl0, ctrl0);   // let Ann's laptop see where Bob is now
+  const hp0 = B.g.hp;
+  let downs = 0;
+  for (let i = 0; i < 180 && !pb.crashed; i++) {
+    step({ ...ctrl0, gun: true }, ctrl0);
+    downs += B.g.events.filter(e => e.type === 'shot-down').length;
+  }
+  check("Ann's rounds hurt Bob, scored on Ann's laptop", B.g.hp < hp0, hp0 + ' → ' + B.g.hp);
+  for (let i = 0; i < 60 * 4; i++) { step(ctrl0, ctrl0); downs += B.g.events.filter(e => e.type === 'shot-down').length; }
+  check('…until Bob is shot down (and his laptop says so once)', pb.crashed && pb.shotDown && downs === 1, downs + ' shot-down events');
+  check('no respawn in a duel: the server starts the next round', B.g.plane.crashed);
+  check("…and Ann sees Bob's plane as down", !A.g.remote.alive);
+  // Missiles: Ann's missile shows up on Bob's laptop and raises his warning.
+  const C = { g: X.createGame(3, 'duel'), d: X.createDuel('Cy') };
+  X.duelReceive(C.d, C.g, { t: 'welcome', id: 2, lan: [], target: 5 }, 0);
+  X.duelReceive(C.d, C.g, { t: 'room', phase: 'fight', round: 1, players }, 0);
+  X.duelReceive(C.d, C.g, { t: 'go', round: 1, spawns, countdown: 0 }, 0);
+  const cp = C.g.plane;
+  const mpos = X.vAdd(cp.pos, X.vScale(cp.fwd, -1200));
+  X.duelReceive(C.d, C.g, { t: 's', p: [cp.pos.x, cp.pos.y, cp.pos.z + 5000], f: [0, 0, 1], u: [0, 1, 0], v: 175, th: 0.5, hp: 100, dead: false, gun: false,
+    m: [[7, mpos.x, mpos.y, mpos.z, ...[cp.fwd.x, cp.fwd.y, cp.fwd.z], 500, 1]] }, 10);
+  X.duelRemoteStep(C.d, C.g, 10.12, 1 / 60);
+  X.gameUpdate(C.g, ctrl0, 1 / 60);
+  check("the other laptop's missile raises MISSILE with its distance", C.g.warn.missile && Math.abs(C.g.warn.missile.dist - 1200) < 120, C.g.warn.missile && Math.round(C.g.warn.missile.dist) + ' m');
+  check("…and it never hits you here (their laptop decides)", C.g.hp === 100);
 }
 
 console.log('game');

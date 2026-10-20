@@ -4,3 +4,5 @@ recordings/
 serve.js
 start.bat
 CLAUDE.md
+duel-server.js
+start.command

@@ -22,11 +22,13 @@ function drawHud(ctx, W, H, st) {
   ctx.font = '14px ' + HUD.font;
   ctx.textBaseline = 'middle';
 
+  const minimal = st.settings.minHud;
   if (!p.crashed) {
-    drawLadder(ctx, W, H, st);
-    // Gun pipper: where rounds will be in ~0.7 s.
+    if (!minimal) drawLadder(ctx, W, H, st);
+    // Gun pipper: where rounds will be in ~0.7 s. WW2: a fixed reflector sight instead.
     const pip = projectToScreen(w, vAdd(p.pos, vScale(p.fwd, 700)), W, H);
-    if (pip.on) {
+    if (p.spec.ERA === 'ww2') drawReflector(ctx, W, H, st);
+    else if (pip.on) {
       ctx.strokeStyle = HUD.green;
       ctx.beginPath();
       ctx.arc(pip.x, pip.y, 14, 0, Math.PI * 2);
@@ -37,9 +39,12 @@ function drawHud(ctx, W, H, st) {
     }
     drawFlightPath(ctx, W, H, st);
     drawLead(ctx, W, H, st);
-    drawTargets(ctx, W, H, st);
-    drawBandits(ctx, W, H, st);
-    drawRingMarker(ctx, W, H, st);
+    if (minimal) drawContacts(ctx, W, H, st);
+    else {
+      drawTargets(ctx, W, H, st);
+      drawBandits(ctx, W, H, st);
+      drawRingMarker(ctx, W, H, st);
+    }
     drawGauges(ctx, W, H, st);
   }
   drawTunnel(ctx, W, H, st);
@@ -88,7 +93,7 @@ function drawHud(ctx, W, H, st) {
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
   else if (st.duel && duelOverlay(ctx, W, H, st)) { /* duel screen drawn */ }
-  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
+  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : p.wingFailed ? 'WING FAILURE' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
   else if (st.warn) {
     ctx.fillStyle = HUD.amber;
     ctx.font = 'bold 18px ' + HUD.font;
@@ -100,7 +105,7 @@ function drawHud(ctx, W, H, st) {
     ctx.textAlign = 'left';
     ctx.font = '12px ' + HUD.font;
     ctx.fillStyle = HUD.dim;
-    ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
+    ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · N bomber · K plane (' + p.spec.name + ') · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
   }
 }
 
@@ -494,8 +499,29 @@ function drawGauges(ctx, W, H, st) {
   box(W * 0.8, 'ALT', String(Math.round(p.pos.y)));
   // G meter under the speed box: amber past the onset of tunnel vision.
   ctx.font = 'bold 15px ' + HUD.font;
-  ctx.fillStyle = p.g > CONFIG.G_ONSET || p.g < CONFIG.REDOUT_G ? HUD.amber : HUD.green;
-  ctx.fillText(p.g.toFixed(1) + ' G', W * 0.2, cy + 32);
+  const S = p.spec;
+  if (S.G_LIMIT) ctx.fillStyle = p.overG > 1 ? HUD.red : p.overG > S.OVER_G_WARN ? HUD.amber : HUD.green;
+  else ctx.fillStyle = p.g > CONFIG.G_ONSET || p.g < CONFIG.REDOUT_G ? HUD.amber : HUD.green;
+  ctx.fillText(p.g.toFixed(1) + ' G' + (S.G_LIMIT ? ' / ' + S.G_LIMIT : ''), W * 0.2, cy + 32);
+  if (S.G_LIMIT && p.wingStress > 0.02) {
+    // Wing stress: fills toward failure.
+    ctx.strokeStyle = HUD.red;
+    ctx.strokeRect(W * 0.2 - 40, cy + 62, 80, 6);
+    ctx.fillStyle = HUD.red;
+    ctx.fillRect(W * 0.2 - 39, cy + 63, 78 * Math.min(1, p.wingStress), 4);
+    ctx.font = '10px ' + HUD.font;
+    ctx.fillText('WING', W * 0.2 - 58, cy + 65);
+  }
+  if (S.G_LIMIT && p.overG > 1 && Math.floor(st.now * 6) % 2 === 0) {
+    ctx.fillStyle = HUD.red;
+    ctx.font = 'bold 22px ' + HUD.font;
+    ctx.fillText('OVER-G', W / 2, H * 0.58);
+  }
+  if (p.engineCut > 0) {
+    ctx.fillStyle = HUD.amber;
+    ctx.font = 'bold 18px ' + HUD.font;
+    ctx.fillText('ENGINE CUT — negative G', W / 2, H * 0.54);
+  }
   // Energy hint: at best turning speed you out-turn anyone; slow, you can't.
   const dv = p.speed - p.spec.CORNER_SPEED;
   ctx.font = '11px ' + HUD.font;
@@ -515,7 +541,68 @@ function drawGauges(ctx, W, H, st) {
   }
   ctx.font = '12px ' + HUD.font;
   ctx.fillStyle = HUD.green;
-  ctx.fillText('MSL ' + (st.game.missileCd > 0 ? 'RELOAD' : 'READY'), W * 0.8, cy + 32);
+  if (S.GUNS) {
+    // Rounds left per group (machine guns, cannons).
+    let row = 0;
+    for (const grp of ['mg', 'cannon']) {
+      let left = 0, full = 0;
+      S.GUNS.forEach((gn, i) => { if (gn.group === grp) { left += p.ammo[i]; full += gn.ammo; } });
+      if (!full) continue;
+      ctx.fillStyle = left === 0 ? HUD.red : left < full * 0.25 ? HUD.amber : HUD.green;
+      ctx.fillText((grp === 'mg' ? 'MG ' : 'CANNON ') + (left === 0 ? 'EMPTY' : Math.round(left / full * 100) + '%'), W * 0.8, cy + 32 + row * 16);
+      row++;
+    }
+  } else ctx.fillText('MSL ' + (st.game.missileCd > 0 ? 'RELOAD' : 'READY'), W * 0.8, cy + 32);
+}
+
+// WW2 reflector sight: a fixed ring (no lead computing). A fighter's wingspan (SIGHT_SPAN) just
+// fills it at SIGHT_RANGE and the dotted inner ring at twice that (about where the guns converge),
+// so it tells you range; where to aim you read off your tracers.
+function drawReflector(ctx, W, H, st) {
+  const p = st.game.plane, S = p.spec, w = st.world;
+  const c = projectToScreen(w, vAdd(p.pos, vScale(p.fwd, 700)), W, H);
+  if (!c.on) return;
+  const e = projectToScreen(w, vAdd(vAdd(p.pos, vScale(p.fwd, 700)), vScale(p.right, 700 * S.SIGHT_SPAN / 2 / S.SIGHT_RANGE)), W, H);
+  const r = Math.hypot(e.x - c.x, e.y - c.y);
+  ctx.strokeStyle = HUD.amber;
+  ctx.fillStyle = HUD.amber;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, r / 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(c.x - r * 1.5, c.y); ctx.lineTo(c.x - r * 0.25, c.y);
+  ctx.moveTo(c.x + r * 0.25, c.y); ctx.lineTo(c.x + r * 1.5, c.y);
+  ctx.moveTo(c.x, c.y + r * 0.25); ctx.lineTo(c.x, c.y + r * 1.3);
+  ctx.stroke();
+}
+
+// Minimal HUD: no markers, but a plane too far to be more than a speck still shows as one (like
+// the eye picks up a dot), only where it really is on screen: no arrows, no labels, no range.
+function drawContacts(ctx, W, H, st) {
+  const g = st.game, w = st.world;
+  const pxPerM = H / 2 / Math.tan(w.camera.fov * DEG / 2);
+  const all = g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [], g.bombers.filter(b => b.alive), g.drones);
+  ctx.fillStyle = 'rgba(30, 34, 40, 0.85)';
+  for (const t of all) {
+    const d = vDist(t.pos, w.camera.position);
+    if (d > CONFIG.SPOT_RANGE) continue;
+    const span = t.kind === 'bomber' ? 36 : t.kind === 'drone' ? 8 : 11;
+    if (span / d * pxPerM > 4) continue;    // big enough to see the model itself
+    const s = projectToScreen(w, t.pos, W, H);
+    if (!s.on) continue;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 // Bottom-right: what the hands are telling the plane.

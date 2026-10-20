@@ -103,6 +103,7 @@ const CONFIG = {
   MISSILE_FUSE: 14,          // proximity fuse (m)
   MISSILE_GIMBAL: 75 * DEG,  // target further off the seeker's nose than this = it loses you
   BANDIT_SPAWN_DIST: 3500,
+  SPOT_RANGE: 8000,          // minimal HUD: a plane further than this is invisible (no speck)
 
   // Bomber (N): a big four-engined target for gunnery practice that flies straight and level; its
   // gunners shoot back (BOMBER_GUNNERS). Hit anywhere on its shape (BOMBER_PARTS); an engine that takes
@@ -141,7 +142,7 @@ const CONFIG = {
   ],
   GUNNER_RANGE: 900,
   GUNNER_RATE: 5,            // rounds/s each
-  GUNNER_DMG: 4,             // your HP per round
+  GUNNER_POWER: 0.8,         // damage per round in jet-gun rounds (4 of your HP)
   GUNNER_HP: 3,
   GUNNER_ERR_MAX: 7 * DEG,   // aim error when you've just arrived / keep moving…
   GUNNER_ERR_MIN: 0.5 * DEG, // …and once they've settled on you
@@ -152,6 +153,7 @@ const CONFIG = {
   WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
   // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal
+  DUEL_ROUND_TIME: 180,      // s: a round nobody wins by then is a draw (WW2 ammo runs out; keep in step with duel-server.js)
   DUEL_HIT_R: 12,            // gun hit radius on the other human's plane (same both ways)
   DUEL_SEND_HZ: 30,          // state updates per second to the other laptop
   DUEL_INTERP: 0.1,          // draw their plane this far in the past (s), between two updates…
@@ -203,6 +205,8 @@ const CONFIG = {
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
+    plane: 'jet',            // planes.js type (start screen / K)
+    minHud: false,           // U: no target markers or arrows, no ladder: find them yourself
     version: 9,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
     assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: RATE — the stick

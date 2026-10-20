@@ -14,7 +14,7 @@
 <div id="panel">
   <div class="panel-title">Tuning <small>(saved)</small></div>
 </div>
-<div id="keys">1 flat hand · 2 stick · C / clap twice calibrate · M rate/assist · P pitch tilt/height · I invert · Y left-hand rudder · T anime look · L head look · G record gestures · H swap hand · V view · D debug · B dogfight/range · N bomber · R reset</div>
+<div id="keys">1 flat hand · 2 stick · C / clap twice calibrate · M rate/assist · P pitch tilt/height · I invert · Y left-hand rudder · T anime look · L head look · G record gestures · H swap hand · V view · D debug · B dogfight/range · N bomber · K plane · U minimal HUD · R reset</div>
 
 <div id="screen-start" class="screen active">
   <div class="card">
@@ -28,6 +28,19 @@
       re-centre. You'll get a 3-second
       countdown to hold your flying hand level, so the game knows what "straight ahead" means.
       Turn your head a little to look around (L turns that off). <b>V</b> switches between chase and cockpit view. Keyboard always works too: arrows fly, W/S throttle, Space guns, F missile.</p>
+    <div class="plane-pick">
+      <label for="plane-pick"><b>Plane</b></label>
+      <select id="plane-pick">
+        <option value="jet">Jet (arcade: lead marker, missiles)</option>
+        <option value="spitfire">Spitfire Mk I (turns best; engine cuts under negative G)</option>
+        <option value="bf109">Bf 109E (climbs best; 20 mm cannons on the fist)</option>
+        <option value="p51">P-51D (fastest; six .50s)</option>
+      </select>
+      <label class="small"><input type="checkbox" id="min-hud"> Minimal HUD (no markers: find them yourself)</label>
+    </div>
+    <p class="small" id="ww2-note">WW2 planes fly a less arcade model: real G limits (over-stress the wing and it breaks), energy
+      matters more, no lead marker (walk your tracers on), limited ammo. <b>Pinch</b> = machine guns, <b>fist</b> = everything
+      (keyboard: Space / Shift).</p>
     <div class="buttons">
       <button id="btn-camera">Start camera</button>
       <button id="btn-keys" class="ghost">Keyboard only</button>

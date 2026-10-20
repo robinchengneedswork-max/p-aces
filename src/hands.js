@@ -124,7 +124,7 @@ function createControls() {
   return {
     f: { roll: createOneEuro(), pitch: createOneEuro(), yaw: createOneEuro() },
     raw: { roll: 0, pitch: 0, yaw: 0 },     // before deadzone/expo, -1..1-ish
-    out: { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false },
+    out: { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false, cannon: false },
     flyM: null, thrM: null,                // last measurements, for the debug view
     flySeen: -1,
     assigned: { fly: null, thr: null },
@@ -314,8 +314,11 @@ function controlsUpdate(c, hands, t, s, fresh = true) {
     else if (fresh) c.pinchReads++;
     c.out.gun = c.pinchReads >= CONFIG.GUN_HOLD && !c.fist;
     c.out.missile = c.fist && !wasFist;
+    // WW2 planes: the fist is held fire for everything (machine guns + cannons).
+    c.out.cannon = c.fist;
   } else {
     c.out.gun = false;
+    c.out.cannon = false;
     c.pinched = false;
     c.pinchReads = 0;
     c.fist = false;

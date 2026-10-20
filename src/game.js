@@ -8,14 +8,14 @@
 // Things a missile can chase are { pos, vel, alive }: drones, bandits, bombers, and g.player (you).
 // Bombers (N, range and dogfight) are big straight-flying targets that never shoot.
 
-function createGame(seed, mode) {
+function createGame(seed, mode, planeType) {
   const rng = makeRng(seed || 12345);
   const start = v3(0, 0, 0);
   start.y = groundHeight(0, 0) + CONFIG.START_ALT;
   const g = {
     rng,
     mode: mode || 'range',
-    plane: createPlane(start),
+    plane: createPlane(start, null, planeType),
     player: { pos: start, vel: v3(0, 0, 0), alive: true, plane: null },
     hp: CONFIG.PLAYER_HP,
     bullets: [],
@@ -88,7 +88,7 @@ function spawnBandit(g, skill) {
   const dir = vRotate(heading.x || heading.z ? heading : v3(0, 0, -1), WORLD_UP, (g.rng() - 0.5) * 1.2);
   const pos = vAdd(p.pos, vScale(dir, CONFIG.BANDIT_SPAWN_DIST));
   pos.y = clamp(p.pos.y + (g.rng() - 0.5) * 600, groundHeight(pos.x, pos.z) + 400, CONFIG.CEILING - 300);
-  const b = createBandit(g.nextId++, skill, pos, vScale(dir, -1), makeRng(Math.floor(g.rng() * 1e9)));
+  const b = createBandit(g.nextId++, skill, pos, vScale(dir, -1), makeRng(Math.floor(g.rng() * 1e9)), PLANE_ENEMY[g.plane.type]);
   g.bandits.push(b);
   g.events.push({ type: 'bandit', pos, skill });
   return b;
@@ -196,7 +196,7 @@ function updateGunners(g, b, dt) {
       const ox = Math.cos(gu.wander) * Math.tan(gu.err) + (g.rng() - 0.5) * 2 * s;
       const oy = Math.sin(gu.wander) * Math.tan(gu.err) + (g.rng() - 0.5) * 2 * s;
       const dir = vNorm(vAdd(aim, vAdd(vScale(side, ox), vScale(vert, oy))));
-      g.bullets.push({ pos: at, vel: vAdd(vScale(dir, CONFIG.GUN_SPEED), b.vel), age: 0, owner: 'bomber', dmg: CONFIG.GUNNER_DMG });
+      g.bullets.push({ pos: at, vel: vAdd(vScale(dir, CONFIG.GUN_SPEED), b.vel), age: 0, owner: 'bomber', power: CONFIG.GUNNER_POWER });
       g.events.push({ type: 'enemy-gun', pos: at });
     }
   }
@@ -302,7 +302,7 @@ function hurtPlayer(g, dmg, pos) {
 // → { target, dir, dist, off (angle between nose and dir), inRange } or null.
 function gunSolution(g) {
   const p = g.plane;
-  if (p.crashed) return null;
+  if (p.crashed || p.spec.LEAD === false) return null;   // WW2: read the lead off your tracers
   const pv = planeVelocity(p);
   let best = null;
   for (const t of lockables(g)) {
@@ -317,6 +317,28 @@ function gunSolution(g) {
     if (!best || off < best.off) best = { target: t, dir, dist, off, inRange: dist <= CONFIG.GUN_RANGE };
   }
   return best;
+}
+
+// A WW2 plane's guns (spec.GUNS): each gun fires from its own spot on the wing or cowl, aimed to
+// cross the nose line at CONVERGENCE. triggers = { mg, cannon } (cannon fires everything).
+// ammo: false = unlimited (AI). Rounds carry power and drop under gravity. Returns the groups fired.
+function fireGuns(g, p, triggers, dt, owner, ammo) {
+  const S = p.spec, fired = { mg: false, cannon: false };
+  const conv = vScale(p.fwd, S.CONVERGENCE);
+  S.GUNS.forEach((gn, i) => {
+    const on = gn.group === 'cannon' ? triggers.cannon : (triggers.mg || triggers.cannon);
+    if (!on || (ammo && p.ammo[i] <= 0)) { p.gunAcc[i] = Math.min(p.gunAcc[i], 1); return; }
+    p.gunAcc[i] += dt * gn.rate;
+    while (p.gunAcc[i] >= 1 && (!ammo || p.ammo[i] > 0)) {
+      p.gunAcc[i] -= 1;
+      if (ammo) p.ammo[i]--;
+      const off = vAdd(vScale(p.right, gn.x), vScale(p.up, gn.y));
+      const dir = vNorm(vSub(conv, off));
+      g.bullets.push({ pos: vAdd(p.pos, off), vel: vAdd(vScale(dir, gn.speed), planeVelocity(p)), age: 0, owner, power: gn.power, drop: true, group: gn.group });
+      fired[gn.group] = true;
+    }
+  });
+  return fired;
 }
 
 function fireBullet(g, from, dir, owner) {
@@ -364,17 +386,23 @@ function gameUpdate(g, ctrl, dt) {
     g.gunSol = gunSolution(g);
     const assist = (ctrl.gunAssist ?? CONFIG.DEFAULTS.gunAssist) * DEG, sol = g.gunSol;
     g.gunAssisted = !!sol && sol.off <= assist && sol.dist <= CONFIG.GUN_ASSIST_RANGE;
-    g.gunAcc = ctrl.gun ? g.gunAcc + dt * CONFIG.GUN_RATE : Math.min(g.gunAcc, 1);
-    while (ctrl.gun && g.gunAcc >= 1) {
-      g.gunAcc -= 1;
-      fireBullet(g, p, g.gunAssisted ? sol.dir : p.fwd, 'player');
-      g.events.push({ type: 'gun', pos: p.pos });
+    if (p.spec.GUNS) {
+      const fired = fireGuns(g, p, { mg: ctrl.gun, cannon: ctrl.cannon }, dt, 'player', true);
+      if (fired.mg) g.events.push({ type: 'gun', pos: p.pos });
+      if (fired.cannon) g.events.push({ type: 'cannon', pos: p.pos });
+    } else {
+      g.gunAcc = ctrl.gun ? g.gunAcc + dt * CONFIG.GUN_RATE : Math.min(g.gunAcc, 1);
+      while (ctrl.gun && g.gunAcc >= 1) {
+        g.gunAcc -= 1;
+        fireBullet(g, p, g.gunAssisted ? sol.dir : p.fwd, 'player');
+        g.events.push({ type: 'gun', pos: p.pos });
+      }
     }
 
-    // Missile: fires at the locked target, or dumb if there's no lock.
+    // Missile: fires at the locked target, or dumb if there's no lock. (No missiles in WW2.)
     g.missileCd = Math.max(0, g.missileCd - dt);
-    updateLock(g, dt);
-    if (ctrl.missile && g.missileCd === 0) {
+    if (p.spec.MISSILES !== false) updateLock(g, dt);
+    if (ctrl.missile && g.missileCd === 0 && p.spec.MISSILES !== false) {
       g.missileCd = CONFIG.MISSILE_COOLDOWN;
       const target = g.lock.locked ? g.lock.target : null;
       g.missiles.push({ id: g.nextId++, pos: vAdd(p.pos, vScale(p.up, -3)), dir: p.fwd, speed: p.speed + 40, target, age: 0, owner: 'player', turn: CONFIG.MISSILE_TURN });
@@ -435,10 +463,16 @@ function updateBandits(g, dt) {
     b.vel = planeVelocity(b.plane);
     if (b.plane.crashed) { killBandit(g, b, 'crashed'); continue; }
 
-    // Guns: bursts while it has a solution, a little spread.
+    // Guns: bursts while it has a solution, a little spread. WW2 bandits fire their real guns
+    // (unlimited ammo), cannons only when the shot is good.
     b.firing = w.fire && P.alive;
-    b.gunAcc = b.firing ? b.gunAcc + dt * CONFIG.BANDIT_GUN_RATE : Math.min(b.gunAcc, 1);
-    while (b.firing && b.gunAcc >= 1) {
+    if (b.plane.spec.GUNS) {
+      const fired = fireGuns(g, b.plane, { mg: b.firing, cannon: b.firing && w.good }, dt, b.id, false);
+      if (fired.mg || fired.cannon) g.events.push({ type: 'enemy-gun', pos: b.pos });
+    }
+    const jetGun = b.firing && !b.plane.spec.GUNS;
+    b.gunAcc = jetGun ? b.gunAcc + dt * CONFIG.BANDIT_GUN_RATE : Math.min(b.gunAcc, 1);
+    while (jetGun && b.gunAcc >= 1) {
       b.gunAcc -= 1;
       const s = CONFIG.BANDIT_GUN_SPREAD;
       let dir = vRotate(b.plane.fwd, b.plane.up, (b.rng() - 0.5) * 2 * s);
@@ -449,7 +483,7 @@ function updateBandits(g, dt) {
 
     // Missiles: hold you in the cone for ENEMY_LOCK_TIME (you get LOCK WARNING), then launch.
     b.missileCd = Math.max(0, b.missileCd - dt);
-    b.lockT = w.lockOn && P.alive ? b.lockT + dt : 0;
+    b.lockT = w.lockOn && P.alive && b.plane.spec.MISSILES !== false ? b.lockT + dt : 0;
     if (b.lockT > 0) g.warn.lock = true;
     if (b.lockT >= CONFIG.ENEMY_LOCK_TIME && b.missileCd === 0) {
       b.missileCd = SKILLS[b.skill].missileCd;
@@ -472,28 +506,30 @@ function updateBandits(g, dt) {
 function updateBullets(g, dt) {
   for (const b of g.bullets) {
     const prev = b.pos;
+    if (b.drop) b.vel = vAdd(b.vel, v3(0, -9.81 * dt, 0));
     b.pos = vAdd(b.pos, vScale(b.vel, dt));
     b.age += dt;
+    const power = b.power ?? 1;
     if (b.owner === 'player') {
       for (const d of g.drones) {
         if (d.alive && segPointDist(prev, b.pos, d.pos) < CONFIG.DRONE_R) { killDrone(g, d, 'gun'); b.age = 99; break; }
       }
       for (const t of g.bandits) {
-        if (t.alive && segPointDist(prev, b.pos, t.pos) < CONFIG.BANDIT_R) { hitBandit(g, t, 1, 'gun'); b.age = 99; break; }
+        if (t.alive && segPointDist(prev, b.pos, t.pos) < (t.plane.spec.HIT_R ?? CONFIG.BANDIT_R)) { hitBandit(g, t, power, 'gun'); b.age = 99; break; }
       }
       for (const t of g.bombers) {
         const part = b.age < 99 && t.alive && bomberHit(t, prev, b.pos, 0);
-        if (part) { hitBomber(g, t, 1, part, b.pos, 'gun'); b.age = 99; break; }
+        if (part) { hitBomber(g, t, power, part, b.pos, 'gun'); b.age = 99; break; }
       }
       const R = g.remote;
-      if (b.age < 99 && R && R.alive && segPointDist(prev, b.pos, R.pos) < CONFIG.DUEL_HIT_R) {
-        g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG, pos: b.pos });
+      if (b.age < 99 && R && R.alive && segPointDist(prev, b.pos, R.pos) < (R.plane.spec.HIT_R ?? CONFIG.DUEL_HIT_R)) {
+        g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG * power, pos: b.pos });
         b.age = 99;
       }
     } else if (b.owner === 'remote') {
       // The other laptop's rounds: drawn here, but only their laptop decides what they hit.
-    } else if (g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < CONFIG.PLANE_HIT_R) {
-      hurtPlayer(g, b.dmg || CONFIG.BANDIT_GUN_DMG, b.pos);
+    } else if (g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < (g.plane.spec.HIT_R ?? CONFIG.PLANE_HIT_R)) {
+      hurtPlayer(g, CONFIG.BANDIT_GUN_DMG * power, b.pos);
       b.age = 99;
     }
     if (b.pos.y < groundHeight(b.pos.x, b.pos.z)) b.age = 99;

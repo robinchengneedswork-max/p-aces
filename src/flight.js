@@ -24,6 +24,10 @@ function createPlane(pos, fwd, type) {
     g: 1, slip: 0, stall: 0,
     strain: 0, red: 0,
     crashed: false,
+    wingStress: 0, overG: 0, wingFailed: false,   // WW2: over-G damage, 0..1 (1 = the wing lets go)
+    engineCut: 0,                                  // WW2 float carburettor: seconds of no power left
+    ammo: spec.GUNS ? spec.GUNS.map(gn => gn.ammo) : null,
+    gunAcc: spec.GUNS ? spec.GUNS.map(() => 0) : null,
   };
   if (fwd) orientPlane(p, fwd);
   return p;
@@ -55,10 +59,19 @@ function rotatePlane(p, axis, a) {
   p.right = vRotate(p.right, axis, a);
 }
 
-// Share of PITCH_RATE available at this speed: 1 at corner speed, less either side.
+// Share of PITCH_RATE available at this speed: 1 at corner speed. Slower, the wing runs out of
+// lift. Faster: the jet is g-limited (∝ 1/speed); a WW2 wing has lift to spare (PITCH_HIGH_EXP 1,
+// so G grows with speed², past the wing's limit) and only heavy stick forces hold it back.
 function pitchEnvelope(speed, spec = CONFIG) {
   const v = Math.max(1, speed), c = spec.CORNER_SPEED;
-  return v < c ? Math.pow(v / c, spec.PITCH_LOW_EXP) : c / v;
+  if (v < c) return Math.pow(v / c, spec.PITCH_LOW_EXP);
+  return Math.pow(v / c, spec.PITCH_HIGH_EXP ?? -1) * stickForce(v, spec);
+}
+
+// 1, falling to STIFF_MIN as the controls grow heavy past STIFF_SPEED (WW2; the jet never stiffens).
+function stickForce(speed, spec) {
+  if (!spec.STIFF_SPEED) return 1;
+  return clamp(1 - (speed - spec.STIFF_SPEED) / spec.STIFF_RANGE, spec.STIFF_MIN, 1);
 }
 
 // How hard the nose is being hauled round (pitch or turn, not roll: fwd doesn't move in a pure
@@ -76,7 +89,7 @@ function flightStep(p, ctrl, dt, assist) {
   p.stall = clamp((C.STALL_SPEED - p.speed) / 20, 0, 1);
   const pull = ctrl.pitch * (1 - 0.7 * p.stall);
   const pitchRate = (pull > 0 ? pull : pull * C.PUSH_SHARE) * C.PITCH_RATE * env;
-  const rollK = clamp(p.speed / C.ROLL_FULL_SPEED, C.ROLL_MIN, 1);
+  const rollK = clamp(p.speed / C.ROLL_FULL_SPEED, C.ROLL_MIN, 1) * (0.5 + 0.5 * stickForce(p.speed, C));
 
   // Assist hands over to plain rate control while you're pulling through vertical or upside
   // down: there "wings level" means rolling 180°, which would fight every loop. Let go of the
@@ -93,7 +106,7 @@ function flightStep(p, ctrl, dt, assist) {
     // pull slide the nose sideways across the screen, which read as yaw.)
     rotatePlane(p, p.right, pitchRate * dt);
     // Banked = turning, like a coordinated turn, as hard as the speed allows.
-    const turn = C.TURN_RATE * Math.sin(bankAngle(p)) * env + ctrl.yaw * C.YAW_RATE;
+    const turn = C.TURN_RATE * Math.sin(bankAngle(p)) * Math.min(env, 1) + ctrl.yaw * C.YAW_RATE;
     rotatePlane(p, WORLD_UP, -turn * dt);
   } else {
     rotatePlane(p, p.fwd, ctrl.roll * C.ROLL_RATE * rollK * dt);
@@ -129,16 +142,34 @@ function flightStep(p, ctrl, dt, assist) {
     p.g = vDot(turnAcc, p.up) / C.A_PER_G + p.up.y;
   }
 
-  // Energy: thrust − drag toward the throttle's speed, gravity on climbs and dives, turns bleed.
+  // Energy: thrust − drag, gravity on climbs and dives, turns bleed. The jet eases toward the
+  // throttle's speed; a propeller's thrust is power ÷ speed against drag ∝ speed².
   p.throttle = clamp(ctrl.throttle, 0, 1);
-  const target = C.SPEED_MIN + p.throttle * (C.SPEED_MAX - C.SPEED_MIN);
   const over = Math.max(0, Math.abs(p.g) - 1);
-  p.speed += ((target - p.speed) * C.ACCEL - C.CLIMB_DRAG * p.path.y - C.TURN_BLEED * over * over) * dt;
+  let thrust;
+  if (C.PROP) {
+    // Float carburettor: negative G starves it; power comes back a moment after.
+    if (C.NEG_G_CUT && p.g < -0.2) p.engineCut = C.NEG_G_CUT;
+    p.engineCut = Math.max(0, p.engineCut - dt);
+    thrust = (p.engineCut > 0 ? 0 : C.POWER * p.throttle / Math.max(p.speed, C.V_STATIC)) - C.DRAG_K * p.speed * p.speed;
+  } else {
+    thrust = (C.SPEED_MIN + p.throttle * (C.SPEED_MAX - C.SPEED_MIN) - p.speed) * C.ACCEL;
+  }
+  // WW2: induced drag ∝ (G / speed)², so the same pull costs far more slow than fast.
+  const bleed = C.TURN_BLEED * over * over * (C.PROP ? Math.min(4, Math.pow(C.CORNER_SPEED / Math.max(p.speed, 30), 2)) : 1);
+  p.speed += (thrust - C.CLIMB_DRAG * p.path.y - bleed) * dt;
   p.speed = clamp(p.speed, C.SPEED_FLOOR, C.SPEED_MAX * 1.4);
 
   // G strain (tunnel vision, drawn by the HUD): builds above onset, drains below it.
   p.strain = clamp(p.strain + (p.g > C.G_ONSET ? (p.g - C.G_ONSET) / C.G_STRAIN_TIME : -C.G_RECOVER) * dt, 0, 1);
   p.red = clamp(p.red + (p.g < C.REDOUT_G ? 1.2 : -1) * dt, 0, 1);
+
+  // WW2 wing: past G_LIMIT (either way) it takes stress; held too long, it fails.
+  if (C.G_LIMIT) {
+    p.overG = Math.max(p.g / C.G_LIMIT, -p.g / (C.G_LIMIT * 0.5));
+    p.wingStress = p.overG > 1 ? p.wingStress + (p.overG - 1) * C.OVER_G_STRESS * dt : Math.max(0, p.wingStress - C.OVER_G_HEAL * dt);
+    if (p.wingStress >= 1) { p.wingFailed = true; p.crashed = true; return p; }
+  }
 
   p.pos = vAdd(p.pos, vScale(p.path, p.speed * dt));
   if (p.pos.y > C.CEILING) p.pos.y = C.CEILING;

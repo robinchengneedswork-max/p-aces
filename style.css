@@ -28,3 +28,6 @@ body.debug #panel, body.debug #keys { display: block; }
 .duel-fields { display: flex; gap: 8px; flex-wrap: wrap; }
 .duel-fields input { flex: 1 1 180px; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3140; background: #0b0d12; color: #e8ecf3; }
 .card { max-height: calc(100vh - 32px); overflow-y: auto; }
+.plane-pick { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+.plane-pick select { flex: 1 1 260px; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3140; background: #0b0d12; color: #e8ecf3; }
+.plane-pick label.small { display: flex; gap: 6px; align-items: center; }

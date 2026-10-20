@@ -46,7 +46,8 @@ function tone(freq, dur, type, gain, slideTo) {
 }
 
 // A looping noise roar whose filter opens with speed.
-function engineSet(speed01, on) {
+// prop: a WW2 engine, a lower, rougher drone.
+function engineSet(speed01, on, prop) {
   const c = ac();
   if (!engine) {
     const src = c.createBufferSource();
@@ -60,12 +61,14 @@ function engineSet(speed01, on) {
     src.start();
     engine = { f, g };
   }
-  engine.f.frequency.setTargetAtTime(250 + speed01 * 900, c.currentTime, 0.1);
+  engine.f.frequency.setTargetAtTime(prop ? 140 + speed01 * 380 : 250 + speed01 * 900, c.currentTime, 0.1);
   engine.g.gain.setTargetAtTime(on ? 0.06 + speed01 * 0.06 : 0, c.currentTime, 0.2);
 }
 
 const SFX = {
   gun() { noiseBurst(0.05, 3000, 0.18); },
+  cannon() { noiseBurst(0.12, 600, 0.35, 120); },
+  creak(bad) { tone(bad ? 70 : 95, bad ? 0.18 : 0.12, 'sawtooth', bad ? 0.09 : 0.04, bad ? 55 : 80); },
   missile() { noiseBurst(0.9, 3000, 0.35, 400); },
   kill() { noiseBurst(1.2, 900, 0.7, 80); tone(90, 0.6, 'sine', 0.3, 30); },
   boom() { noiseBurst(0.6, 700, 0.3, 80); },

@@ -9,9 +9,10 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (221 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (235 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
-and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
+`node test/duel.js` (22 checks: the LAN duel server with real WebSocket clients) and `node test/planes.js [report]`
+(19 checks: WW2 flight models).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -24,6 +25,8 @@ and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clie
 - `N` spawns a **bomber** (range or dogfight, up to 3): a big four-engined target crossing ahead,
   straight and level; top, ball and tail gunners shoot back. Hits count anywhere on its shape; 6 rounds into an engine
   set it burning (drains HP). Shot down it falls burning to the ground.
+- `K` cycles the plane (jet, Spitfire Mk I, Bf 109E, P-51D; also on the start screen); `U` minimal HUD
+  (no markers/arrows/ladder; planes too far to see show as a speck, only where they are on screen).
 - `B` toggles the test range (drones + rings) and **dogfight** (one bandit at a time that shoots back:
   rookie, rookie, regular, regular, then aces).
 - `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
@@ -323,3 +326,32 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   - Tracers: camera-facing ribbons (WebGL lines are 1 px), ~100 m long but never longer than the
     round has flown, width ∝ distance (~6 px), bright head → clear tail; yours yellow, others
     red-orange. Normal blending: additive washed both to white against the pale sky.
+- **Round 22 (2026-10-20): WW2 planes, step 2.** User: per-plane flight models "slightly less arcadey"
+  (real G limits on the wings, energy, carburettor neg-G), limited ammo, 109 cannons, and NO lead
+  marker for WW2 ("use tracers on MG to get the lead, then open up with cannon"); minimal HUD.
+  - `planes.js`: spitfire / bf109 / p51 over a shared `WW2` base. PROP: thrust = POWER × throttle /
+    max(speed, V_STATIC 80), drag = DRAG_K v² (full throttle levels at SPEED_MAX), gravity 9.81,
+    real G. Pitch envelope ∝ v below corner, ∝ v above it × `stickForce` (heavy controls past
+    STIFF_SPEED), so pulls past G_LIMIT are possible: wingStress += (G/limit − 1) × 2 per s, heals
+    0.15/s, at 1 → `wingFailed` (crash, "WING FAILURE"). Turn bleed × (corner / v)² (induced drag),
+    so fast pulls hold their G and slow ones bleed. Spitfire `NEG_G_CUT` 1.4 s (109/P-51 none).
+  - `test/planes.js report` numbers: climb 13.8 / 15.8 / 17.6 m/s; sustained 360° 15 / 18 / 18 s
+    (real ~19 / ~22 / ~22: ~25% quick, same order); full stick out of a 200 m/s dive breaks the
+    Spitfire wing in 1.1 s, the P-51 in 1.6 s, the 109's heavy elevator can't (7 G) — historical.
+    Full stick at cruise (150) holds (it bleeds speed). First tuning had best climb at 40 m/s
+    (thrust ∝ 1/v unbounded → V_STATIC) and nothing ever broke (speed-blind bleed → (c/v)²).
+  - Guns (`fireGuns`): per-gun spot, rate, muzzle speed, power (jet-round units: 1 = 5 HP on a
+    human), ammo; wing guns aim at CONVERGENCE; rounds drop. Pinch = MG, fist (`controls.out.cannon`
+    = fist held) / Shift = everything. Spitfire 8 × .303 (~15 s), 109 2 MG + 2 × 20 mm (power 4 =
+    20 HP, 28 rounds ≈ 7 s), P-51 6 × .50. Rearm on respawn / round. Hit radius on WW2 planes 7 m.
+    No missiles, no lead marker, no assist (spec LEAD/MISSILES false). Reflector sight: a fighter
+    fills the ring at 125 m, the dotted half-ring at ~250 m.
+  - AI flies the enemy type (PLANE_ENEMY: Spitfire ↔ 109, P-51 → 109) with its real guns (unlimited,
+    cannon only on a sure shot), pulls ≤ 95% of G_LIMIT, WW2 gun range × 0.55, throttle cap mostly
+    lifted (a prop at 70% power never caught you). 3 × 60 s: no AI wing failures.
+  - Duel: snapshots carry `cn` (cannon), the other laptop draws their real guns; `DUEL_ROUND_TIME`
+    180 s → draw, no point (server `roundTime`). Chase camera closer for WW2 (CHASE_BACK 20).
+  - Models: `makePropModel` (elliptical / square-tip / tapered wings, coloured cowl, 3-blade prop),
+    cockpit shows the long cowling over the dash. Sounds: lower prop drone, cannon thump, wing creak.
+  - Browser-checked: models, cockpit, sight, minimal HUD speck, over-G HUD at 10 G. Two-page duel:
+    each side sees the other's type (background tab froze A's countdown: headless-only).

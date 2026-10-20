@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -825,6 +825,35 @@ console.log('duel (two laptops, in one process)');
   check("…and it never hits you here (their laptop decides)", C.g.hp === 100);
 }
 
+console.log('WW2 duel');
+{
+  // Spitfire (Ann) vs 109 (Bob), wired back to back with no latency.
+  const DT = 1 / 60;
+  const A = { g: X.createGame(1, 'duel', 'spitfire'), d: X.createDuel('Ann') }, B = { g: X.createGame(2, 'duel', 'bf109'), d: X.createDuel('Bob') };
+  const players = [{ id: 1, name: 'Ann', score: 0, ready: true }, { id: 2, name: 'Bob', score: 0, ready: true }];
+  X.duelReceive(A.d, A.g, { t: 'welcome', id: 1, lan: [], target: 5 }, 0);
+  X.duelReceive(B.d, B.g, { t: 'welcome', id: 2, lan: [], target: 5 }, 0);
+  for (const P of [A, B]) X.duelReceive(P.d, P.g, { t: 'room', phase: 'fight', round: 1, players }, 0);
+  // Bob 200 m behind Ann, both heading the same way: Bob has the shot.
+  const spawns = { 1: { x: 0, z: -200, hx: 0, hz: -1, alt: 3000 }, 2: { x: 0, z: 0, hx: 0, hz: -1, alt: 3000 } };
+  for (const P of [A, B]) X.duelReceive(P.d, P.g, { t: 'go', round: 1, spawns, countdown: 0 }, 0);
+  check('each laptop keeps its own plane through the round start', A.g.plane.type === 'spitfire' && B.g.plane.type === 'bf109');
+  let now = 0, dmg = 0, big = 0, remoteCannon = 0;
+  const c0 = { roll: 0, pitch: 0, yaw: 0, throttle: 0.7, gun: false, cannon: false, missile: false };
+  for (let i = 0; i < 40; i++) {
+    now += DT;
+    const cb = { ...c0, cannon: i < 30 };
+    X.gameUpdate(A.g, c0, DT); X.gameUpdate(B.g, cb, DT);
+    for (const e of B.g.events) if (e.type === 'duel-hit') { dmg += e.dmg; if (e.dmg === 20) big++; X.duelReceive(A.d, A.g, { t: 'hit', dmg: e.dmg }, now); }
+    X.duelReceive(A.d, A.g, X.duelSnapshot(B.g, cb.gun, cb.cannon), now);
+    X.duelReceive(B.d, B.g, X.duelSnapshot(A.g, false, false), now);
+    X.duelRemoteStep(A.d, A.g, now, DT); X.duelRemoteStep(B.d, B.g, now, DT);
+    remoteCannon += A.g.bullets.filter(b => b.owner === 'remote' && b.group === 'cannon' && b.age < DT * 1.5).length;
+  }
+  check('Ann sees Bob as a 109, firing its cannon tracers', A.g.remote && A.g.remote.plane.type === 'bf109' && remoteCannon > 0, remoteCannon + ' cannon rounds');
+  check("Bob's hits land on Ann's laptop: a cannon hit is 20 HP (five kill), a machine-gun round 1.25", big > 0 && Math.abs(100 - A.g.hp - Math.min(100, dmg)) < 1e-6, big + ' cannon hits, ' + dmg + ' HP');
+}
+
 console.log('plane specs');
 {
   const jet = X.planeSpec('jet');
@@ -951,6 +980,56 @@ console.log('bomber gunners');
     out = out || g.events.some(e => e.type === 'gunner-down' && e.name === 'TAIL');
   }
   check('rounds into the tail turret put the tail gunner out', out && b.gunners[2].hp <= 0 && b.gunners[0].hp > 0);
+}
+
+console.log('WW2 guns');
+{
+  const ctl = (o) => ({ roll: 0, pitch: 0, yaw: 0, throttle: 0.6, gun: false, cannon: false, missile: false, ...o });
+  const ammoOf = (p, grp) => p.spec.GUNS.reduce((n, gn, i) => n + (gn.group === grp ? p.ammo[i] : 0), 0);
+  const g = X.createGame(41, 'range', 'bf109');
+  const p = g.plane;
+  check('a game in a 109 flies a 109', p.type === 'bf109' && p.spec.ERA === 'ww2');
+  const mg0 = ammoOf(p, 'mg'), cn0 = ammoOf(p, 'cannon');
+  for (let i = 0; i < 60; i++) X.gameUpdate(g, ctl({ gun: true }), 1 / 60);
+  check('pinch: machine guns only', ammoOf(p, 'mg') < mg0 && ammoOf(p, 'cannon') === cn0, (mg0 - ammoOf(p, 'mg')) + ' mg rounds');
+  for (let i = 0; i < 60; i++) X.gameUpdate(g, ctl({ cannon: true }), 1 / 60);
+  check('fist: cannons join in', ammoOf(p, 'cannon') < cn0);
+  for (let i = 0; i < 60 * 10; i++) X.gameUpdate(g, ctl({ cannon: true }), 1 / 60);
+  const fired = g.bullets.length;
+  check('the cannon drums run dry (~7 s of fire)', ammoOf(p, 'cannon') === 0 && ammoOf(p, 'mg') > 0);
+  for (let i = 0; i < 30; i++) X.gameUpdate(g, ctl({ missile: true }), 1 / 60);
+  check('no missiles in a WW2 plane, and no lead marker', g.missiles.length === 0 && X.gunSolution(g) === null);
+  p.crashed = true;
+  for (let i = 0; i < 60 * 3 && g.plane.crashed; i++) X.gameUpdate(g, ctl(), 1 / 60);
+  check('respawn rearms', ammoOf(g.plane, 'cannon') === cn0 && ammoOf(g.plane, 'mg') === mg0);
+
+  // Convergence: the Spitfire's eight wing guns spread 6.6 m but cross ~CONVERGENCE ahead; rounds drop.
+  const g2 = X.createGame(42, 'range', 'spitfire');
+  const q = g2.plane;
+  X.fireGuns(g2, q, { mg: true }, 1 / 5, 'player', true);
+  const rounds = g2.bullets.slice();
+  const lateral = t => { const xs = rounds.map(b => X.vDot(X.vSub(X.vAdd(b.pos, X.vScale(X.vSub(b.vel, X.vScale(q.path, q.speed)), t)), X.vAdd(q.pos, X.vScale(q.fwd, 0))), q.right)); return Math.max(...xs) - Math.min(...xs); };
+  const tConv = q.spec.CONVERGENCE / q.spec.GUNS[0].speed;
+  check('wing guns: 6.6 m apart at the muzzle, together at the convergence range', rounds.length === 8 && lateral(0) > 6 && lateral(tConv) < 0.5, lateral(0).toFixed(1) + ' m → ' + lateral(tConv).toFixed(2) + ' m');
+  const r0 = { ...rounds[0].vel };
+  for (let i = 0; i < 30; i++) X.gameUpdate(g2, ctl(), 1 / 60);
+  check('WW2 rounds drop under gravity', rounds[0].vel.y < r0.y - 4);
+
+  // A WW2 dogfight: the bandit flies the other side's plane with its own guns, and never pulls
+  // its own wings off (the AI keeps under the limit).
+  let wings = 0, shots = 0, types = new Set();
+  for (const seed of [51, 52, 53]) {
+    const d = X.createGame(seed, 'dogfight', 'spitfire');
+    for (let i = 0; i < 60 * 60; i++) {
+      d.hp = 100;
+      X.gameUpdate(d, ctl({ throttle: 0.8 }), 1 / 60);   // straight and level: can it catch you and shoot?
+      for (const b of d.bandits) { types.add(b.plane.type); if (b.plane.wingFailed) wings++; }
+      shots += d.events.filter(e => e.type === 'enemy-gun').length;
+    }
+  }
+  check('Spitfire dogfight: bandits fly 109s', types.size === 1 && types.has('bf109'), [...types].join());
+  check('…they shoot their own guns at you', shots > 50, shots + ' bursts');
+  check('…and never pull their own wings off (3 × 60 s)', wings === 0);
 }
 
 console.log('gun lead + assist');

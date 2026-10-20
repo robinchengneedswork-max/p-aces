@@ -37,11 +37,11 @@ const vec = (v, r) => [r(v.x), r(v.y), r(v.z)];
 const unvec = a => v3(a[0], a[1], a[2]);
 
 // What we tell the other laptop about ourselves.
-function duelSnapshot(g, firing) {
+function duelSnapshot(g, firing, cannon) {
   const p = g.plane;
   return {
     t: 's', p: vec(p.pos, r1), f: vec(p.fwd, r3), u: vec(p.up, r3), v: r1(p.speed), th: r3(p.throttle), ty: p.type,
-    hp: g.hp, dead: !!p.crashed, gun: !!firing && !p.crashed,
+    hp: g.hp, dead: !!p.crashed, gun: !!firing && !p.crashed, cn: !!cannon && !p.crashed,
     m: g.missiles.filter(m => m.owner === 'player').map(m => [m.id, ...vec(m.pos, r1), ...vec(m.dir, r3), r1(m.speed), m.target ? 1 : 0]),
   };
 }
@@ -89,7 +89,7 @@ function duelReceive(d, g, m, now) {
   } else if (m.t === 'roundEnd') {
     d.phase = 'roundEnd';
     const won = m.winner === d.myId;
-    out.push({ type: 'round', won, how: m.how });
+    out.push({ type: 'round', won, how: m.how, draw: m.winner == null });
   } else if (m.t === 'over') {
     d.phase = 'over';
     out.push({ type: 'over', won: m.winner === d.myId });
@@ -158,6 +158,11 @@ function duelRemoteStep(d, g, now, dt) {
   g.missiles = g.missiles.filter(m => !m.remote || seen.has(m.key));
 
   // Their guns: tracers from their plane while they're firing (looks only; their laptop scores).
+  // WW2 planes: their real guns and cannons (we don't know their ammo: their laptop stops sending gun).
+  if (R.plane.spec.GUNS) {
+    if (R.alive) fireGuns(g, R.plane, { mg: !!last.gun, cannon: !!last.cn }, dt, 'remote', false);
+    return;
+  }
   d.gunAcc = last.gun && R.alive ? d.gunAcc + dt * CONFIG.GUN_RATE : Math.min(d.gunAcc, 1);
   while (last.gun && R.alive && d.gunAcc >= 1) {
     d.gunAcc -= 1;

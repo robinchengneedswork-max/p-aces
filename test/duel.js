@@ -127,6 +127,28 @@ function client(port) {
   const c3 = await A.next('calib');
   check('a new opponent can join and the match starts over', c3 && c3.round === 1);
 
+  console.log('time limit');
+  {
+    const srv2 = http.createServer((q, r) => { r.writeHead(404); r.end(); });
+    attachDuel(srv2, { roundGap: 60, countdown: 0.05, roundTime: 0.3 });
+    await new Promise(r => srv2.listen(0, '127.0.0.1', r));
+    const port2 = srv2.address().port;
+    const E = client(port2), F = client(port2);
+    await E.open; await F.open;
+    E.send({ t: 'hello', name: 'Eve' }); F.send({ t: 'hello', name: 'Fay' });
+    await E.next('calib');
+    E.send({ t: 'ready' }); F.send({ t: 'ready' });
+    await E.next('go');
+    const end2 = await E.next('roundEnd', () => true, 2000);
+    check('nobody down by the time limit → a draw, no point to anyone', end2 && end2.winner === null && end2.how === 'time' && Object.values(end2.scores).every(v => v === 0));
+    const c4 = await E.next('calib');
+    check('…and the next round starts', c4 && c4.round === 2);
+    E.ws.close(); F.ws.close();
+    await wait(200);
+    srv2.closeAllConnections();
+    srv2.close();
+  }
+
   // Let the sockets close on their own: process.exit() with WebSockets still closing trips a libuv
   // assertion on Windows (exit code 127 after every check passed).
   A.ws.close(); C.ws.close(); D.ws.close();

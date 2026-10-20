@@ -20,6 +20,7 @@ const dgram = require('dgram');
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const TARGET = 5;            // kills to win the match
 const DUEL_SEP = 7000;       // metres apart at the start of a round, nose to nose
+const ROUND_TIME = 180;     // s: then the round is a draw (src/config.js DUEL_ROUND_TIME)
 const DUEL_ALT = 3000;       // metres above the ground at the start of a round
 
 // ---- WebSocket, by hand ----------------------------------------------------------------------
@@ -93,10 +94,13 @@ function upgrade(req, socket) {
 
 // ---- The duel room -------------------------------------------------------------------------
 
-// opts.roundGap / opts.countdown (ms / s) are shortened by the tests; opts.rng for repeatable spawns.
+// opts.roundGap / opts.countdown / opts.roundTime (ms / s / s) are shortened by the tests; opts.rng
+// for repeatable spawns. A round nobody has won after roundTime is a draw (no point): WW2 planes
+// carry a few seconds of ammo each and can both run dry.
 function createRoom(opts = {}) {
   const roundGap = opts.roundGap ?? 3000;
   const countdown = opts.countdown ?? 3;
+  const roundTime = opts.roundTime ?? ROUND_TIME;
   const rng = opts.rng || Math.random;
   const room = { players: [], phase: 'lobby', round: 0, nextId: 1, timer: null, lan: opts.lan || [] };
 
@@ -129,10 +133,20 @@ function createRoom(opts = {}) {
     room.fightStart = Date.now() + countdown * 1000;
     broadcast({ t: 'go', round: room.round, spawns, countdown });
     broadcast(view());
+    room.timer = setTimeout(drawRound, (countdown + roundTime) * 1000);
+  }
+
+  function drawRound() {
+    if (room.phase !== 'fight') return;
+    room.phase = 'roundEnd';
+    broadcast({ t: 'roundEnd', winner: null, loser: null, how: 'time', scores: scores() });
+    broadcast(view());
+    room.timer = setTimeout(startCalib, roundGap);
   }
 
   function endRound(loser, how) {
     if (room.phase !== 'fight') return;
+    clear();
     const winner = other(loser);
     winner.score++;
     room.phase = 'roundEnd';
@@ -238,4 +252,4 @@ function attachDuel(server, opts = {}) {
   return room;
 }
 
-module.exports = { attachDuel, createRoom, lanAddresses, parseFrames, frame, acceptKey, TARGET, DUEL_SEP, DUEL_ALT };
+module.exports = { attachDuel, createRoom, lanAddresses, parseFrames, frame, acceptKey, TARGET, DUEL_SEP, DUEL_ALT, ROUND_TIME };

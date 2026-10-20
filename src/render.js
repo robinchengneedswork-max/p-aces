@@ -21,7 +21,7 @@ function createWorld(canvas, pixelRatio) {
 
   const w = { renderer, scene, camera, terrain: makeTerrain(), farTerrain: makeFarTerrain(), farCenter: null, sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
     drones: new Map(), bandits: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), damageSmoke: makeSmoke({ color: 0x3a3a3a, size: 3.5, opacity: 0.5, life: 1.6, max: 600 }), booms: [], missiles: [],
-    trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
+    trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0, planeType: 'jet',
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
   scene.add(w.terrain, w.farTerrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.damageSmoke.points, w.trails[0].mesh, w.trails[1].mesh);
   return w;
@@ -191,6 +191,69 @@ function makePlaneModel(paint) {
   return g;
 }
 
+// WW2 fighters, nose down -z, low-poly. Wing planform per type (elliptical Spitfire, square-tipped
+// 109, straight-tapered P-51), a nose in the type's colour, a spinning three-blade prop (userData.prop).
+// userData.flame is an empty stand-in so code written for the jet's afterburner just works.
+const PROP_LOOKS = {
+  spitfire: { len: 9.1, span: 11.2, chord: 2.5, plan: 'ellipse', body: 0x63704a, dark: 0x4b3f2c, nose: 0x63704a, canopyZ: -0.2 },
+  bf109: { len: 8.9, span: 9.9, chord: 2.0, plan: 'square', body: 0x8c969f, dark: 0x58626b, nose: 0xd9b52e, canopyZ: -0.5 },
+  p51: { len: 9.8, span: 11.3, chord: 2.6, plan: 'taper', body: 0xb7bec6, dark: 0x30353c, nose: 0xc4372c, canopyZ: 0.1, scoop: true },
+};
+
+function makePropModel(type) {
+  const L = PROP_LOOKS[type];
+  const g = new THREE.Group();
+  const mat = c => new THREE.MeshPhongMaterial({ color: c, flatShading: true });
+  const body = mat(L.body), dark = mat(L.dark), noseM = mat(L.nose);
+  const mesh = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); g.add(o); return o; };
+  // Fuselage: thick at the cowl, thin at the tail.
+  const fusG = new THREE.CylinderGeometry(0.28, 0.62, L.len * 0.72, 8);
+  fusG.rotateX(Math.PI / 2);
+  const fus = mesh(fusG, body, 0, 0, L.len * 0.14);
+  const cowlG = new THREE.CylinderGeometry(0.62, 0.52, L.len * 0.24, 8);
+  cowlG.rotateX(Math.PI / 2);
+  const cowl = mesh(cowlG, noseM, 0, 0, -L.len * 0.34);
+  const spinG = new THREE.ConeGeometry(0.32, 0.7, 8);
+  spinG.rotateX(-Math.PI / 2);
+  mesh(spinG, dark, 0, 0, -L.len * 0.46 - 0.35);
+  // Wing planform as a shape in (x, z-forward-negative), extruded thin.
+  const half = L.span / 2, pts = [];
+  const chordAt = u => L.plan === 'ellipse' ? Math.max(0.35, Math.sqrt(1 - u * u)) : L.plan === 'square' ? 1 - 0.4 * u : 1 - 0.5 * u;
+  for (let i = -10; i <= 10; i++) { const u = Math.abs(i / 10); pts.push([i / 10 * half, -L.chord * 0.35 * chordAt(u)]); }
+  for (let i = 10; i >= -10; i--) { const u = Math.abs(i / 10); pts.push([i / 10 * half, L.chord * 0.65 * chordAt(u)]); }
+  const wingShape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  const wingG = new THREE.ExtrudeGeometry(wingShape, { depth: 0.16, bevelEnabled: false });
+  wingG.rotateX(Math.PI / 2);
+  const wing = mesh(wingG, body, 0, -0.25, -L.len * 0.08);
+  const tailG = new THREE.BoxGeometry(L.span * 0.33, 0.1, 0.9);
+  const tail = mesh(tailG, body, 0, 0.1, L.len * 0.44);
+  const fin = mesh(new THREE.BoxGeometry(0.1, 1.3, 1.1), dark, 0, 0.7, L.len * 0.45);
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), new THREE.MeshPhongMaterial({ color: 0x223344, shininess: 90 }));
+  glass.scale.set(0.85, 0.8, 2.1);
+  glass.position.set(0, 0.55, L.canopyZ);
+  g.add(glass);
+  if (L.scoop) mesh(new THREE.BoxGeometry(0.55, 0.45, 1.8), body, 0, -0.62, L.len * 0.1);
+  // Propeller: three blades and a faint disc; main spins it.
+  const prop = new THREE.Group();
+  prop.position.set(0, 0, -L.len * 0.47);
+  prop.add(new THREE.Mesh(new THREE.CircleGeometry(1.5, 20), new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })));
+  for (let i = 0; i < 3; i++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.5, 0.05), dark);
+    blade.geometry.translate(0, 0.75, 0);
+    blade.rotation.z = i * Math.PI * 2 / 3;
+    prop.add(blade);
+  }
+  g.add(prop);
+  for (const part of [fus, cowl, wing, tail, fin]) addInk(part, 0.12);
+  g.userData = { fus, glass, cowl, prop, flame: new THREE.Object3D(), type, len: L.len };
+  return g;
+}
+
+// The right model for a plane type (jet paint only matters for the jet).
+function makeAircraft(type, paint) {
+  return planeSpec(type).ERA === 'ww2' ? makePropModel(planeSpec(type).type) : makePlaneModel(paint);
+}
+
 // Cockpit: its own little scene in the plane's frame (x right, y up, -z forward), eye at
 // COCKPIT_EYE. Drawn in a second pass with its own close-range camera, so nothing gets cut away
 // by the world camera's 1 m near plane (which made the sides see-through).
@@ -280,11 +343,28 @@ function makeCockpit() {
   throttle.add(lever, knob);
   scene.add(throttle);
 
-  // The outside of your own plane: wings, tail, canards and engine from the real model, minus
-  // the fuselage shell (it would fill the seat) and canopy glass. A nose cone ahead of the dash and
-  // a spine behind the seat stand in for the fuselage.
-  const ext = makePlaneModel();
+  const ext = makeCockpitExt('jet');
+  scene.add(ext);
+
+  return { scene, camera, sun, needles, stick, throttle, ext };
+}
+
+// The outside of your own plane seen from the seat: the real model minus the fuselage shell (it
+// would fill the seat) and canopy glass. Jet: a nose cone ahead of the dash and a spine behind the
+// seat stand in for the fuselage. WW2: the long engine cowling over the dash, with the prop.
+function makeCockpitExt(type) {
+  const ext = makeAircraft(type);
   ext.remove(ext.userData.fus, ext.userData.glass);
+  if (ext.userData.cowl) {
+    ext.remove(ext.userData.cowl);
+    const L = ext.userData.len;
+    const cowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.62, L * 0.4, 10), ext.userData.cowl.material);
+    cowl.geometry.rotateX(Math.PI / 2);
+    cowl.position.set(0, 0.55, -L * 0.3);
+    ext.userData.prop.position.y = 0.55;
+    ext.add(cowl);
+    return ext;
+  }
   const skin = new THREE.MeshPhongMaterial({ color: 0x9aa7b4, flatShading: true });
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.62, 6.4, 8), skin);
   nose.geometry.rotateX(-Math.PI / 2);
@@ -293,9 +373,22 @@ function makeCockpit() {
   spine.geometry.rotateX(Math.PI / 2);
   spine.position.set(0, 0.35, 4.7);
   ext.add(nose, spine);
-  scene.add(ext);
+  return ext;
+}
 
-  return { scene, camera, sun, needles, stick, throttle, ext };
+// Swap your own model (and the cockpit's view of it) when you change plane.
+function setOwnModel(w, type) {
+  if (w.planeType === type) return;
+  w.planeType = type;
+  w.scene.remove(w.plane);
+  w.plane = makeAircraft(type);
+  styleNew(w, w.plane);
+  w.scene.add(w.plane);
+  const C = w.cockpit;
+  C.scene.remove(C.ext);
+  C.ext = makeCockpitExt(type);
+  styleNew(w, C.ext);
+  C.scene.add(C.ext);
 }
 
 // A four-engined bomber (wingspan 36 m), nose down -z. Props spin (userData.props); the gun
@@ -407,7 +500,7 @@ function updateTracers(w, bullets) {
 // Wingtip vapour: per tip, two crossed ribbons (one spanning the plane's up, one its wings), so
 // the trail reads from behind, from the side and from the cockpit. Vertex alpha fades with age.
 const TRAIL_MAX = 140;
-const WINGTIP = { out: 7.4, back: 5.8 };   // tip of the delta wing in the plane's frame
+const WINGTIP = { out: 7.4, back: 5.8 };   // tip of the delta wing in the plane's frame (WW2: spec.WINGTIP)
 
 function makeTrail() {
   const geo = new THREE.BufferGeometry();
@@ -431,7 +524,8 @@ function updateTrails(w, p, dt) {
   w.vapor = k;
   w.trails.forEach((T, i) => {
     const side = i ? 1 : -1;
-    const tip = vAdd(vAdd(p.pos, vScale(p.right, side * WINGTIP.out)), vScale(p.fwd, -WINGTIP.back));
+    const T0 = p.spec.WINGTIP || WINGTIP;
+    const tip = vAdd(vAdd(p.pos, vScale(p.right, side * T0.out)), vScale(p.fwd, -T0.back));
     for (const s of T.pts) s.age += dt;
     // Respawn teleports the plane: don't draw a ribbon across the map.
     const last = T.pts[T.pts.length - 1];
@@ -531,6 +625,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     }
   });
 
+  setOwnModel(w, p.type);
   w.plane.position.copy(tv(p.pos));
   setBasis(w.plane, p.fwd, p.up);
   w.plane.visible = !p.crashed && w.view === 'chase';
@@ -553,6 +648,9 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   const flameLen = 0.4 + p.throttle * 1.2 + Math.random() * 0.15;
   w.plane.userData.flame.scale.set(1, 1, flameLen);
   w.cockpit.ext.userData.flame.scale.set(1, 1, flameLen);
+  // Props spin (a random angle each picture reads as a blur), unless the engine is cut.
+  const spin = m => { if (m.userData.prop) m.userData.prop.rotation.z = Math.random() * 6.3; };
+  if (!(p.engineCut > 0)) { spin(w.plane); spin(w.cockpit.ext); }
 
   // Drones: create/remove meshes to match the game list.
   const alive = new Set();
@@ -573,10 +671,17 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   for (const b of others) {
     flying.add(b.id);
     let m = w.bandits.get(b.id);
-    if (!m) { m = makePlaneModel(b.kind === 'remote' ? DUEL_PAINT : BANDIT_PAINT); styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m); }
+    // (Rebuilt if the type changed: the duel opponent picked another plane.)
+    if (m && m.userData.planeType !== b.plane.type) { w.scene.remove(m); m = null; }
+    if (!m) {
+      m = makeAircraft(b.plane.type, b.kind === 'remote' ? DUEL_PAINT : BANDIT_PAINT);
+      m.userData.planeType = b.plane.type;
+      styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m);
+    }
     m.position.copy(tv(b.plane.pos));
     setBasis(m, b.plane.fwd, b.plane.up);
     m.userData.flame.scale.set(1, 1, 0.4 + b.plane.throttle * 1.2 + Math.random() * 0.15);
+    if (m.userData.prop) m.userData.prop.rotation.z = Math.random() * 6.3;
   }
   // Bombers keep their model while they fall burning.
   for (const b of g.bombers || []) {
@@ -709,7 +814,8 @@ function updateCamera(w, p, dt, look) {
     w.camPos = null;
     return;
   }
-  const want = pos.clone().addScaledVector(fwd, -36).addScaledVector(up, 8);
+  // (WW2 fighters are smaller and slower: the camera sits closer, spec.CHASE_BACK / CHASE_UP.)
+  const want = pos.clone().addScaledVector(fwd, -(p.spec.CHASE_BACK ?? 36)).addScaledVector(up, p.spec.CHASE_UP ?? 8);
   if (!w.camPos) w.camPos = want.clone();
   w.camPos.lerp(want, 1 - Math.exp(-dt * 7));
   // The chase camera banks with the plane, a beat behind it, like Ace Combat's.

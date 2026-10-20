@@ -8,7 +8,7 @@ const video = document.getElementById('cam');
 let settings = loadSettings();
 let controls = createControls();
 // ?dogfight starts in dogfight mode (B toggles in game).
-let game = createGame(Date.now() % 100000, new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range');
+let game = createGame(Date.now() % 100000, new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range', settings.plane);
 let world = null;
 let mode = 'camera';         // 'camera' | 'keyboard'
 let debug = true;
@@ -24,6 +24,7 @@ let hurtFlash = 0, warnT = 0;   // red edge flash when hit; time to the next war
 let shake = 0;                  // camera shake from hits, 0..1, decays
 let critT = 0;                  // time to the next DAMAGE CRITICAL beep
 let lockTickT = 0;
+let creakT = 0;                 // time to the next over-G creak
 let duel = null;               // 1v1 LAN duel state (duel.js), or null
 let duelWs = null;             // its WebSocket to the host laptop
 let drawAcc = 0;               // anime look: time banked toward the next 24 fps picture
@@ -110,7 +111,7 @@ function finishRange(skip) {
 // host laptop's server. host '' = this laptop hosts.
 function duelConnect(name, host) {
   duel = createDuel(name);
-  game = createGame(Date.now() % 100000, 'duel');
+  game = createGame(Date.now() % 100000, 'duel', settings.plane);
   const addr = (host || 'localhost').trim().replace(/^\w+:\/\//, '').replace(/\/.*$/, '');
   duel.host = addr.includes(':') ? addr : addr + ':8068';
   try { duelWs = new WebSocket('ws://' + duel.host + '/duel'); } catch (e) { duel.phase = 'failed'; return; }
@@ -141,6 +142,7 @@ function duelEvent(u) {
     if (mode === 'camera') startCalibration(CONFIG.CALIB_COUNTDOWN);
     else duelReady();
   } else if (u.type === 'go') { calib = null; SFX.calib(); }
+  else if (u.type === 'round' && u.draw) duel.result = { text: 'TIME — NO POINT', sub: 'nobody went down in ' + Math.round(CONFIG.DUEL_ROUND_TIME / 60) + ' minutes', color: HUD.amber };
   else if (u.type === 'round') duel.result = { text: u.won ? 'ROUND TO YOU' : 'ROUND TO ' + them.toUpperCase(), sub: u.how === 'crash' ? (u.won ? them + ' flew into the ground' : 'you flew into the ground') : '', color: u.won ? HUD.green : HUD.red };
   else if (u.type === 'over') duel.result = { text: u.won ? 'YOU WIN THE DUEL' : them.toUpperCase() + ' WINS THE DUEL', sub: 'Enter for a rematch', color: u.won ? HUD.green : HUD.red };
   else if (u.type === 'left') flash(them.toUpperCase() + ' LEFT — waiting for an opponent', HUD.amber);
@@ -274,6 +276,7 @@ function frame(ts) {
     yaw: useKb ? kb.yaw : controls.out.yaw,
     throttle: camera ? controls.out.throttle : kb.throttle,
     gun: keys.has('Space') || (camera && controls.out.gun),
+    cannon: keys.has('ShiftLeft') || keys.has('ShiftRight') || (camera && controls.out.cannon),
     gunAssist: settings.gunAssist,
     missile: (camera && controls.out.missile) || keys.has('KeyF'),
     assist: assistOn(settings),
@@ -299,11 +302,12 @@ function frame(ts) {
       if (e.type === 'shot-down' || e.type === 'crash') duelSend({ t: 'down', how: e.type === 'crash' ? 'crash' : 'shot' });
     }
     duel.sendAcc += dt;
-    if (duel.sendAcc >= 1 / CONFIG.DUEL_SEND_HZ) { duel.sendAcc = 0; duelSend(duelSnapshot(game, ctrl.gun && !duelHold)); }
+    if (duel.sendAcc >= 1 / CONFIG.DUEL_SEND_HZ) { duel.sendAcc = 0; duelSend(duelSnapshot(game, ctrl.gun && !duelHold, ctrl.cannon && !duelHold)); }
   }
   pendingEvents.push(...game.events);
   for (const e of game.events) {
     if (e.type === 'gun') SFX.gun();
+    if (e.type === 'cannon') SFX.cannon();
     if (e.type === 'missile') { SFX.missile(); missileFlash = 0.4; }
     if (e.type === 'kill') {
       SFX.kill();
@@ -321,7 +325,7 @@ function frame(ts) {
     if (e.type === 'enemy-gun') SFX.enemyGun();
     if (e.type === 'shot-down') SFX.crash();
     if (e.type === 'boom') SFX.boom();
-    if (e.type === 'crash') SFX.crash();
+    if (e.type === 'crash') { SFX.crash(); if (game.plane.wingFailed) flash('WING FAILURE — over-G', HUD.red); }
     if (e.type === 'ring') { SFX.ring(); flash('RING +50', HUD.amber); }
     if (e.type === 'ring-miss') { SFX.ringMiss(); flash('MISSED RING', HUD.dim); }
     if (e.type === 'lock') SFX.locked();
@@ -344,7 +348,14 @@ function frame(ts) {
     if (m) { SFX.warnMissile(m.dist < CONFIG.BREAK_DIST[1]); warnT = clamp(m.dist / 4000, 0.07, 0.3); }
     else if (game.warn.lock) { SFX.warnLock(); warnT = 0.45; }
   }
-  engineSet((game.plane.speed - game.plane.spec.SPEED_MIN) / (game.plane.spec.SPEED_MAX - game.plane.spec.SPEED_MIN), !game.plane.crashed);
+  const gp = game.plane;
+  engineSet((gp.speed - gp.spec.SPEED_MIN) / (gp.spec.SPEED_MAX - gp.spec.SPEED_MIN), !gp.crashed && !(gp.engineCut > 0), gp.spec.PROP);
+  // WW2 wing over-stressed: creaks, faster the closer it is to letting go.
+  creakT -= dt;
+  if (gp.spec.G_LIMIT && !gp.crashed && gp.overG > gp.spec.OVER_G_WARN && creakT <= 0) {
+    SFX.creak(gp.overG > 1);
+    creakT = gp.overG > 1 ? clamp(0.35 - gp.wingStress * 0.3, 0.06, 0.35) : 0.5;
+  }
   for (const f of flashes) f.age += dt;
   flashes = flashes.filter(f => f.age < 1.4);
 
@@ -481,6 +492,17 @@ function toggle(key, a, b, text) {
   flash(text(settings[key]), HUD.ink);
 }
 
+// Start screen: plane and minimal HUD.
+const planePick = document.getElementById('plane-pick'), minHudBox = document.getElementById('min-hud');
+planePick.value = PLANES[settings.plane] ? settings.plane : DEFAULT_PLANE;
+minHudBox.checked = !!settings.minHud;
+planePick.addEventListener('change', () => {
+  settings.plane = planePick.value;
+  saveSettings();
+  if (!duel) game = createGame(Date.now() % 100000, game.mode, settings.plane);
+});
+minHudBox.addEventListener('change', () => { settings.minHud = minHudBox.checked; saveSettings(); });
+
 document.getElementById('btn-camera').addEventListener('click', () => start(true));
 document.getElementById('btn-keys').addEventListener('click', () => start(false));
 
@@ -505,7 +527,7 @@ if (location.protocol === 'https:') {
   document.getElementById('btn-duel-keys').addEventListener('click', () => start(false, duelOptsFromForm()));
 }
 
-const PREVENT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'];
+const PREVENT = ['Space', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'];
 window.addEventListener('keydown', e => {
   if (PREVENT.includes(e.code)) e.preventDefault();
   if (e.repeat) return;
@@ -520,13 +542,25 @@ window.addEventListener('keydown', e => {
     if (duel.phase === 'calib') { calib = null; duelReady(); }
     if (duel.phase === 'over') duelSend({ t: 'rematch' });
   }
-  if (e.code === 'KeyR' && !duel) { game = createGame(Date.now() % 100000, game.mode); flash('RESET', HUD.ink); }
+  if (e.code === 'KeyR' && !duel) { game = createGame(Date.now() % 100000, game.mode, settings.plane); flash('RESET', HUD.ink); }
   if (e.code === 'KeyN' && !duel) {
     if (game.bombers.filter(b => b.alive).length < CONFIG.BOMBER_MAX) spawnBomber(game);
     else flash('BOMBERS: ' + CONFIG.BOMBER_MAX + ' AT ONCE', HUD.dim);
   }
+  if (e.code === 'KeyK' && !duel) {
+    const i = PLANE_ORDER.indexOf(settings.plane);
+    settings.plane = PLANE_ORDER[(i + 1) % PLANE_ORDER.length];
+    saveSettings();
+    game = createGame(Date.now() % 100000, game.mode, settings.plane);
+    flash(planeSpec(settings.plane).name, HUD.ink);
+  }
+  if (e.code === 'KeyU') {
+    settings.minHud = !settings.minHud;
+    saveSettings();
+    flash(settings.minHud ? 'MINIMAL HUD — no markers, find them yourself' : 'FULL HUD', HUD.ink);
+  }
   if (e.code === 'KeyB' && !duel) {
-    game = createGame(Date.now() % 100000, game.mode === 'range' ? 'dogfight' : 'range');
+    game = createGame(Date.now() % 100000, game.mode === 'range' ? 'dogfight' : 'range', settings.plane);
     flash(game.mode === 'dogfight' ? 'DOGFIGHT — bandits incoming' : 'TEST RANGE', HUD.ink);
   }
   if (e.code === 'Digit1' && settings.scheme !== 'flat') toggle('scheme', 'flat', 'stick', () => 'FLAT HAND');

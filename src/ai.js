@@ -21,8 +21,8 @@ const SKILLS = {
 };
 const DODGE_IDEAL = 1200;  // m: start the break mid CONFIG.BREAK_DIST
 
-function createBandit(id, skill, pos, fwd, rng) {
-  const plane = createPlane(pos, fwd);
+function createBandit(id, skill, pos, fwd, rng, type) {
+  const plane = createPlane(pos, fwd, type);
   plane.speed = plane.spec.CORNER_SPEED + 20;
   const sk = SKILLS[skill];
   return {
@@ -76,7 +76,14 @@ function pilotStep(b, target, threats, dt) {
   const p = b.plane, P = b.pilot, sk = SKILLS[b.skill];
   const rng = b.rng;
   // Energy: a hard turn bleeds speed (flight.js), so a good pilot eases off below corner speed.
-  const pullMax = p.speed < p.spec.CORNER_SPEED - sk.energy ? Math.min(sk.pull, 0.7) : sk.pull;
+  let pullMax = p.speed < p.spec.CORNER_SPEED - sk.energy ? Math.min(sk.pull, 0.7) : sk.pull;
+  // WW2 wings break: pull no more than ~95% of the limit (G ≈ 1 + pull × available rate × speed / g).
+  if (p.spec.G_LIMIT) {
+    const perPull = p.spec.PITCH_RATE * pitchEnvelope(p.speed, p.spec) * p.speed / p.spec.A_PER_G;
+    pullMax = Math.min(pullMax, Math.max(0.2, (p.spec.G_LIMIT * 0.95 - 1) / perPull));
+  }
+  const ww2 = p.spec.ERA === 'ww2';
+  const gunRange = sk.gunRange * (ww2 ? 0.55 : 1);   // WW2 guns are short-ranged
   // Reaction: refresh our picture of the target every `react` s, extrapolate it in between.
   P.think -= dt;
   if (target && (P.think <= 0 || !P.seen)) {
@@ -89,7 +96,7 @@ function pilotStep(b, target, threats, dt) {
   if (P.seen) P.seen.age += dt;
   const tp = P.seen ? vAdd(P.seen.pos, vScale(P.seen.vel, P.seen.age)) : null;
 
-  let ctrl, fire = false, lockOn = false;
+  let ctrl, fire = false, lockOn = false, good = false;
   let throttle = 0.85;
   const toT = tp ? vSub(tp, p.pos) : null;
   const dist = toT ? vLen(toT) : Infinity;
@@ -130,7 +137,7 @@ function pilotStep(b, target, threats, dt) {
     const s = steerTo(p, tp, pullMax);
     ctrl = { roll: clamp(s.roll + P.jinkRoll, -1, 1), pitch: pullMax, yaw: 0 };
     throttle = 1;
-  } else if (P.extendT > 0 || (p.speed < 105 && P.mode !== 'extend')) {
+  } else if (P.extendT > 0 || (p.speed < p.spec.CORNER_SPEED * 0.62 && P.mode !== 'extend')) {
     // Too slow to fight: unload, nose a little low, full burner, until fast again.
     if (P.mode !== 'extend') P.extendT = 3;
     P.mode = 'extend';
@@ -142,7 +149,7 @@ function pilotStep(b, target, threats, dt) {
   } else if (tp) {
     // Attack: lead pursuit — aim where the target will be when the rounds get there.
     P.mode = 'attack';
-    const tof = dist / (CONFIG.GUN_SPEED + p.speed);
+    const tof = dist / ((p.spec.GUNS ? p.spec.GUNS[0].speed : CONFIG.GUN_SPEED) + p.speed);
     const lead = vAdd(tp, vScale(P.seen.vel, tof));
     // Aim error turns the lead point a little.
     let aimDir = vNorm(vSub(lead, p.pos));
@@ -159,12 +166,16 @@ function pilotStep(b, target, threats, dt) {
     if (dist < 600 && closing > 40) throttle = 0.3;
     else if (dist > 2000) throttle = 1;
     // Fire inside its cone, or whenever the rounds would pass within ~15 m of the target.
-    fire = !headOn && dist < sk.gunRange && (s.off < sk.gunCone || dist * Math.sin(s.off) < 15);
+    fire = !headOn && dist < gunRange && (s.off < sk.gunCone || dist * Math.sin(s.off) < 15);
+    good = fire && dist < gunRange * 0.6 && dist * Math.sin(s.off) < 8;   // cannons: only a sure shot
     lockOn = s.off < CONFIG.LOCK_CONE && dist < CONFIG.LOCK_RANGE && dist > CONFIG.ENEMY_MIN_RANGE;
   } else {
     P.mode = 'patrol';
     ctrl = recoverCtrl(p);
     ctrl.pitch = clamp((CONFIG.START_ALT + groundHeight(p.pos.x, p.pos.z) - p.pos.y) / 400, -0.3, 0.3);
   }
-  return { roll: ctrl.roll, pitch: ctrl.pitch, yaw: ctrl.yaw || 0, throttle: Math.min(throttle, sk.throttle), fire, lockOn };
+  // A prop loses far more speed to a throttle cap than the jet did (thrust ∝ power): WW2 pilots
+  // keep most of it, or a rookie could never catch you.
+  const cap = ww2 ? 1 - (1 - sk.throttle) * 0.3 : sk.throttle;
+  return { roll: ctrl.roll, pitch: ctrl.pitch, yaw: ctrl.yaw || 0, throttle: Math.min(throttle, cap), fire, good, lockOn: lockOn && !ww2 };
 }

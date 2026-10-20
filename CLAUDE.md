@@ -239,3 +239,8 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     readout). Rendering: a coarse far terrain layer (60 km, 500 m cells, polygon-offset behind the
     detailed patch), 84 km sea, fog far = 4600 + 1.6 × altitude (max 30 km), camera far 40 km.
     Screenshots: ground to the horizon at 8 km with clouds below; 15 km is hazy; low level unchanged.
+- **Round 15 (2026-10-19):** user got his first kill after range calibration. Then: "slightly slower,
+  same feeling of fast — turning radius a little slower". Every turn rate × 0.8 (pitch 0.96, assist
+  turn 0.6, missiles 1.04 / 0.88, vapour thresholds), with A_PER_G and SLIP_GRIP × 0.8 so a full
+  pull still reads ~9 G and slips ~7°. Speeds, FOV and roll rate untouched. BREAK_DIST re-swept →
+  950-1450 m (AI dodge ideal 1200). Fights run longer (bandit life vs a shooting regular 31/72/150 s).

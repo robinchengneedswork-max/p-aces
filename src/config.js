@@ -14,13 +14,14 @@ const CONFIG = {
   ROLL_RATE: 3.2,            // rad/s at full stick (rate mode), at ROLL_FULL_SPEED and up
   ROLL_FULL_SPEED: 130,      // slower than this, the ailerons bite less…
   ROLL_MIN: 0.6,             // …down to this share of ROLL_RATE
-  PITCH_RATE: 1.2,           // rad/s at full pull, at CORNER_SPEED (the tightest turn)
+  PITCH_RATE: 0.96,          // rad/s at full pull, at CORNER_SPEED (the tightest turn). Was 1.2; user: "slightly
+                             // slower turning, same feeling of speed" → every turn rate × 0.8, speeds untouched
   CORNER_SPEED: 170,         // best turning speed. Slower: the wings run out of lift (rate ∝ speed^LOW_EXP);
   PITCH_LOW_EXP: 0.8,        // faster: the g limit caps it (rate ∝ 1/speed). Throttle 0.5 cruises about here.
   PUSH_SHARE: 0.7,           // pushing (negative g) gets this share of the pull rate
-  A_PER_G: 26,               // arcade m/s² per displayed g: a full pull at corner speed reads ~9 G
+  A_PER_G: 20.8,             // arcade m/s² per displayed g: a full pull at corner speed reads ~9 G (× 0.8 with the turns)
   TURN_BLEED: 0.85,          // m/s² of speed lost per (G-1)²: hard turns cost energy
-  SLIP_GRIP: 9,              // how fast the flight path follows the nose (1/s) at corner speed: a hard
+  SLIP_GRIP: 7.2,            // how fast the flight path follows the nose (1/s) at corner speed: a hard
                              // pull runs ~7° of slip; slower = more slip (mushier)
   STALL_SPEED: 70,           // below this the nose drops on its own…
   STALL_DROP: 0.9,           // …at up to this rate (rad/s), and pulls fade out
@@ -32,15 +33,15 @@ const CONFIG = {
   YAW_RATE: 0.35,
   MAX_BANK: 75 * DEG,        // assist: full stick = this bank angle
   BANK_GAIN: 4,              // assist: how hard it chases the target bank
-  TURN_RATE: 0.75,           // assist: rad/s of heading change at 90° of bank
+  TURN_RATE: 0.6,            // assist: rad/s of heading change at 90° of bank
   LOOP_PITCH: 0.3,           // assist: pulling at least this hard past vertical/inverted = looping
   LOOP_UP: 0.2,              // …"inverted" = canopy pointing less than this far up
   LOOP_VERTICAL: 0.85,       // …"past vertical" = nose this steep (sin of ~58°)
   CEILING: 15000,
   CRASH_MARGIN: 4,
   RESPAWN_TIME: 2,
-  VAPOR_MIN_RATE: 0.35,      // wingtip vapour starts when the nose swings this fast (rad/s)…
-  VAPOR_FULL_RATE: 0.55,     // …and is full this much faster again (a full pull is 1.1 rad/s)
+  VAPOR_MIN_RATE: 0.28,      // wingtip vapour starts when the nose swings this fast (rad/s)…
+  VAPOR_FULL_RATE: 0.44,     // …and is full this much faster again (a full pull is ~0.9 rad/s)
   VAPOR_LIFE: 1.4,           // seconds a trail lingers
   VAPOR_WIDTH: 0.35,         // half-width at the wingtip (m); widens as it drifts back
   START_ALT: 8000,           // metres above the ground at start/respawn (user: "try 8k and 15k")
@@ -62,7 +63,7 @@ const CONFIG = {
   GUN_SPEED: 900,
   GUN_LIFE: 1.4,
   MISSILE_SPEED: 420,
-  MISSILE_TURN: 1.3,         // rad/s. Missiles chase where you ARE (pure pursuit, no lead): then a hard
+  MISSILE_TURN: 1.04,        // rad/s (× 0.8 with the planes). Missiles chase where you ARE (pure pursuit, no lead): then a hard
                              // break at the right moment beats one, flying straight never does. Yours
                              // turn a little harder than theirs (bandits get a narrower dodge window)
   MISSILE_LIFE: 7,
@@ -89,8 +90,8 @@ const CONFIG = {
   ENEMY_MISSILE_DMG: 45,     // your HP per enemy missile
   ENEMY_MIN_RANGE: 600,      // bandits don't launch closer than this (guns range)
   ENEMY_LOCK_TIME: 1.6,      // a bandit must hold you in its cone this long to launch (LOCK WARNING meanwhile)
-  ENEMY_MISSILE_TURN: 1.1,   // rad/s (turn radius ~550 m at full speed)
-  BREAK_DIST: [900, 1250],   // a full pull started with the missile this far away (m) beats it from any
+  ENEMY_MISSILE_TURN: 0.88,  // rad/s (turn radius ~680 m at full speed; × 0.8 with the planes)
+  BREAK_DIST: [950, 1450],   // (re-swept after the × 0.8 turns; was 900-1250) a full pull started with the missile this far away (m) beats it from any
                              // side (swept: behind, beside, head-on). As a TIME it varies 3x by aspect,
                              // as a distance it doesn't: ~2 missile turn radii. HUD shows BREAK in it.
   MISSILE_FUSE: 14,          // proximity fuse (m)

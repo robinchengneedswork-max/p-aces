@@ -19,7 +19,7 @@ const SKILLS = {
   regular: { name: 'REGULAR', react: 0.3,  aim: 2 * DEG,   pull: 0.8,  throttle: 0.85, joust: false, gunRange: 800, gunCone: 4 * DEG,   missileCd: 11, energy: 40, breakAt: 0.8,  dodge: 160, panic: 0.1, hp: 10, reward: 350 },
   ace:     { name: 'ACE',     react: 0.15, aim: 0.8 * DEG, pull: 1,    throttle: 1,    joust: false, gunRange: 900, gunCone: 3.5 * DEG, missileCd: 7,  energy: 15, breakAt: 1,    dodge: 70,  panic: 0,   hp: 16, reward: 800 },
 };
-const DODGE_IDEAL = 1075;  // m: start the break mid CONFIG.BREAK_DIST
+const DODGE_IDEAL = 1200;  // m: start the break mid CONFIG.BREAK_DIST
 
 function createBandit(id, skill, pos, fwd, rng) {
   const plane = createPlane(pos, fwd);

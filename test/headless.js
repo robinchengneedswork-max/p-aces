@@ -243,17 +243,21 @@ console.log('left-hand rudder');
   X.calibrateNeutral(s, [left({}), stick]);
   check('calibration records the rudder hand resting angle', s.neutral.thr && Math.abs(s.neutral.thr.roll - X.measureHand(left({})).roll) < 1e-9);
   check('left hand at rest = no rudder', drive([left({}), stick], 30, s).out.yaw === 0);
-  const right = drive([left({ roll: 20 }), stick], 30, s);
-  check('turn the left hand clockwise 20° → right rudder', right.out.yaw > 0.4, right.raw.yaw.toFixed(2));
-  check('anticlockwise → left rudder', drive([left({ roll: -20 }), stick], 30, s).out.yaw < -0.4);
+  // Rudder only for a big, deliberate turn toward 90° (user: small turns made it hard to focus).
+  check('a 40° turn of the left hand is still no rudder', drive([left({ roll: 40 }), stick], 30, s).out.yaw === 0);
+  const right = drive([left({ roll: 80 }), stick], 30, s);
+  check('turn the left hand clockwise ~80° → right rudder', right.out.yaw > 0.5, right.out.yaw.toFixed(2));
+  check('anticlockwise ~80° → left rudder', drive([left({ roll: -80 }), stick], 30, s).out.yaw < -0.5);
+  const full = drive([left({ roll: 92 }), stick], 30, s);
+  check('…a turn just past 90° stays right rudder (no flip where the folded angle wraps)', full.out.yaw > 0.9, full.out.yaw.toFixed(2));
   check('raising the left hand (throttle) does not steer', drive([left({ cy: 0.3 }), stick], 30, s).out.yaw === 0);
   check('pinching (guns) does not steer', drive([left({ pinch: true }), stick], 30, s).out.yaw === 0);
   check('fist (missile) does not steer', drive([left({ fist: true }), stick], 30, s).out.yaw === 0);
   check('rudder does not touch roll or pitch', right.out.roll === 0 && right.out.pitch === 0);
   check('a 5° wobble of the left hand stays inside the rudder deadzone', drive([left({ roll: 5 }), stick], 30, s).out.yaw === 0);
   check('rudder deadzone is its own setting (0 = every degree counts)', drive([left({ roll: 5 }), stick], 30, { ...s, yawDeadzone: 0 }).out.yaw > 0);
-  check('Y off → no rudder from the hand', drive([left({ roll: 20 }), stick], 30, { ...s, thrRudder: false }).out.yaw === 0);
-  const gone = drive([left({ roll: 20 }), stick], 30, s);
+  check('Y off → no rudder from the hand', drive([left({ roll: 80 }), stick], 30, { ...s, thrRudder: false }).out.yaw === 0);
+  const gone = drive([left({ roll: 80 }), stick], 30, s);
   for (let i = 0; i < 30; i++) X.controlsUpdate(gone, [stick], 1 + i / 30, s);
   check('left hand leaves view → rudder returns to centre', Math.abs(gone.out.yaw) < 0.01);
 }
@@ -397,7 +401,7 @@ console.log('range calibration');
     X.rangeSweepAdd(sw, [thr({ cy: 0.5 + 0.1 * k, roll: 12 * j }), fist({ cx: 0.6 + 0.05 * k, lean: 8 * j })], s);
   }
   const set = X.rangeSweepFinish(sw, s);
-  check('the sweep sets every direction it saw', ['roll left', 'roll right', 'pull', 'push', 'rudder left', 'rudder right', 'throttle'].every(d => set.includes(d)), set.join(', '));
+  check('the sweep sets every direction it saw', ['roll left', 'roll right', 'pull', 'push', 'throttle'].every(d => set.includes(d)), set.join(', '));
   const after = drive([thr({}), fist({ cx: 0.64 })], 40, s).out.roll;
   check('after the sweep a short slide reaches (near) full roll', before < 0.5 && after > 0.85, before.toFixed(2) + ' → ' + after.toFixed(2));
   const lean = drive([thr({}), fist({ lean: 7 })], 40, s).out.pitch;
@@ -406,7 +410,8 @@ console.log('range calibration');
   check('throttle spans your own up/down travel', top > 0.95 && bot < 0.05, top.toFixed(2) + ' / ' + bot.toFixed(2));
   // Re-centring keeps the range.
   X.calibrateNeutral(s, [thr({}), fist({})]);
-  check('re-centring (C) keeps the swept range', !!s.neutral.stick.range && !!s.neutral.thr.cy && !!s.neutral.thr.yaw);
+  check('re-centring (C) keeps the swept range', !!s.neutral.stick.range && !!s.neutral.thr.cy);
+  check('the sweep leaves the rudder alone (it needs a deliberate ~90° turn)', !s.neutral.thr.yaw);
   // A sweep where the hand never moved changes nothing.
   const s2 = settings({ scheme: 'stick' });
   X.calibrateNeutral(s2, [fist({})]);
@@ -449,10 +454,12 @@ function look(kpFn, n, s, h = X.createHead(), t0 = 0) {
   return h;
 }
 {
-  const auto = look(i => (i < 20 ? face() : face(15)), 50, settings());
+  // These sizes were tuned at a 0.045 head deadzone; the default is now 0.065 (user), checked below.
+  const auto = look(i => (i < 20 ? face() : face(15)), 50, settings({ headDeadzone: 0.045 }));
   check('uncalibrated: first frames become forward, then turns read', auto.look.yaw > 40 * DEG && Math.abs(auto.look.pitch) < 5 * DEG,
     (auto.look.yaw / DEG).toFixed(0) + '° / ' + (auto.look.pitch / DEG).toFixed(0) + '°');
-  const s = settings({ headNeutral: X.measureFace(face()) });
+  const s = settings({ headNeutral: X.measureFace(face()), headDeadzone: 0.045 });
+  check('default head deadzone ignores a small 4° nod', look(face(0, -4), 30, settings({ headNeutral: X.measureFace(face()) })).look.pitch === 0);
   check('facing the camera = looking forward', (() => { const h = look(face(), 30, s); return h.look.yaw === 0 && h.look.pitch === 0; })());
   const r = look(face(15), 30, s);
   check('turn head 15° right → view swings well right (amplified)', r.look.yaw > 40 * DEG, (r.look.yaw / DEG).toFixed(0) + '°');

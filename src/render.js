@@ -20,10 +20,10 @@ function createWorld(canvas, pixelRatio) {
   scene.add(sun);
 
   const w = { renderer, scene, camera, terrain: makeTerrain(), farTerrain: makeFarTerrain(), farCenter: null, sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
-    drones: new Map(), bandits: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
+    drones: new Map(), bandits: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), damageSmoke: makeSmoke({ color: 0x3a3a3a, size: 3.5, opacity: 0.5, life: 1.6, max: 600 }), booms: [], missiles: [],
     trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
-  scene.add(w.terrain, w.farTerrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
+  scene.add(w.terrain, w.farTerrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.damageSmoke.points, w.trails[0].mesh, w.trails[1].mesh);
   return w;
 }
 
@@ -380,14 +380,40 @@ function updateTrails(w, p, dt) {
   });
 }
 
-function makeSmoke() {
-  const MAX = 1200;
+// Puffs are points with a soft round sprite (plain points draw as squares). Missile trails are
+// big and pale; damage smoke is smaller and dark (made for right behind your own plane).
+let puffSprite = null;
+function makePuffSprite() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.5, 'rgba(255,255,255,0.6)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr;
+  x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+function makeSmoke(opts = {}) {
+  const MAX = opts.max || 1200;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX * 3), 3));
   geo.setDrawRange(0, 0);
-  const points = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xe8e8e8, size: 7, transparent: true, opacity: 0.55, depthWrite: false }));
+  puffSprite = puffSprite || makePuffSprite();
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({ color: opts.color ?? 0xe8e8e8, size: opts.size || 7, map: puffSprite,
+    transparent: true, opacity: opts.opacity ?? 0.55, depthWrite: false }));
   points.frustumCulled = false;
-  return { points, puffs: [], max: MAX };
+  return { points, puffs: [], max: MAX, life: opts.life || 2.5 };
+}
+
+function updateSmoke(S, dt) {
+  for (const p of S.puffs) p.age += dt;
+  S.puffs = S.puffs.filter(p => p.age < S.life).slice(-S.max);
+  const sp = S.points.geometry.attributes.position;
+  S.puffs.forEach((p, i) => sp.array.set([p.x, p.y, p.z], i * 3));
+  sp.needsUpdate = true;
+  S.points.geometry.setDrawRange(0, S.puffs.length);
 }
 
 function setBasis(obj, fwd, up) {
@@ -511,13 +537,8 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     setBasis(m, ms.dir, Math.abs(ms.dir.y) > 0.99 ? v3(1, 0, 0) : WORLD_UP);
     w.smoke.puffs.push({ x: ms.pos.x, y: ms.pos.y, z: ms.pos.z, age: 0 });
   });
-  const S = w.smoke;
-  for (const s of S.puffs) s.age += dt;
-  S.puffs = S.puffs.filter(s => s.age < 2.5).slice(-S.max);
-  const sp = S.points.geometry.attributes.position;
-  S.puffs.forEach((s, i) => sp.array.set([s.x, s.y, s.z], i * 3));
-  sp.needsUpdate = true;
-  S.points.geometry.setDrawRange(0, S.puffs.length);
+  updateSmoke(w.smoke, dt);
+  updateSmoke(w.damageSmoke, dt);
 
   for (const e of g.events) {
     if (e.type === 'kill') addBoom(w, e.pos, e.bandit ? 60 : 40);
@@ -543,6 +564,25 @@ function renderWorld(w, g, dt, now, look, ctrl) {
 
   updateTrails(w, p, dt);
   updateCamera(w, p, dt, look);
+  // Hit: jolt the camera (position and a little roll), harder the bigger the hit.
+  if (w.shake > 0.01 && !p.crashed) {
+    const k = w.shake * w.shake, r = () => Math.random() * 2 - 1;
+    w.camera.position.add(new THREE.Vector3(r(), r(), r()).multiplyScalar(2.2 * k));
+    w.camera.rotateZ(r() * 0.05 * k);
+    w.camera.rotateX(r() * 0.02 * k);
+  }
+  // Damaged planes trail smoke, thicker the worse it is.
+  const smokeFrom = (pl, frac) => {
+    if (pl.crashed || frac >= CONFIG.SMOKE_HP) return;
+    const n = frac < 0.3 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      const at = vAdd(pl.pos, vScale(pl.fwd, -8 - Math.random() * 4));
+      w.damageSmoke.puffs.push({ x: at.x + (Math.random() - 0.5) * 2, y: at.y + (Math.random() - 0.5) * 2, z: at.z + (Math.random() - 0.5) * 2, age: 0 });
+    }
+  };
+  smokeFrom(p, g.hp / CONFIG.PLAYER_HP);
+  if (g.remote && g.remote.alive) smokeFrom(g.remote.plane, g.remote.hp / CONFIG.PLAYER_HP);
+  for (const b of g.bandits || []) smokeFrom(b.plane, b.hp / b.maxHp);
   w.renderer.clear();
   w.renderer.render(w.scene, w.camera);
   if (inCockpit) {

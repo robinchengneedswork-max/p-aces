@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (191 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (195 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
@@ -271,3 +271,15 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     20 hits → round to the host, round 2 calibrates. Background tabs throttle rAF in one headless
     browser (test-only). **Not yet played on two real laptops / a Mac.**
   - Mac: `start.command` (LF endings forced by .gitattributes, mode 755 in git); needs Node + Chrome.
+- **Round 17 (2026-10-19), after the first real two-laptop duel ("that really worked!"):**
+  - Head deadzone default 0.045 → 0.065 (settings v9 raises saves below it).
+  - The loser's next-round calibration was hidden by SHOT DOWN (their plane is still down when
+    `calib` arrives): HUD order is now recorder → calibration → duel screens → crashed.
+  - Getting hit: camera shake (∝ damage, decays), stronger red flash; ≤ `CRITICAL_HP` 35: pulsing
+    red border, DAMAGE CRITICAL, alarm tone; planes under 60% HP trail dark smoke (own, bandits,
+    duel opponent: `damageSmoke`, a separate soft-sprite point system — the missile one drew big
+    white squares right behind your own plane).
+  - Rudder only near a 90° turn of the left hand: yawRange 85°, yawDeadzone 0.65 (starts ~55°),
+    v9 resets saves. measureHand now also returns `dial`, the UNFOLDED knuckle angle: the folded
+    ±90° angle flips sign exactly at 90°. Calibration stores `thr.dial`; the range sweep no longer
+    sets rudder (it would undo the deliberate deadzone).

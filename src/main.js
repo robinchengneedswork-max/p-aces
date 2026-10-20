@@ -21,6 +21,8 @@ let calib = null;            // { phase: 'centre' | 'range', left: seconds, swee
 let flashes = [];
 let missileFlash = 0;
 let hurtFlash = 0, warnT = 0;   // red edge flash when hit; time to the next warning tone
+let shake = 0;                  // camera shake from hits, 0..1, decays
+let critT = 0;                  // time to the next DAMAGE CRITICAL beep
 let lockTickT = 0;
 let duel = null;               // 1v1 LAN duel state (duel.js), or null
 let duelWs = null;             // its WebSocket to the host laptop
@@ -55,7 +57,13 @@ function loadSettings() {
     if ((saved.version || 1) < 7) s.assist = { ...s.assist, stick: false };
     // v8: pitch is more sensitive by default; saves still on the old 30° move to the new one.
     if ((saved.version || 1) < 8 && s.stickPitch >= 30) s.stickPitch = CONFIG.DEFAULTS.stickPitch;
-    s.version = 8;
+    // v9: rudder only near a 90° turn of the left hand; head deadzone a bit wider.
+    if ((saved.version || 1) < 9) {
+      s.yawRange = CONFIG.DEFAULTS.yawRange;
+      s.yawDeadzone = CONFIG.DEFAULTS.yawDeadzone;
+      s.headDeadzone = Math.max(s.headDeadzone, CONFIG.DEFAULTS.headDeadzone);
+    }
+    s.version = 9;
   }
   return s;
 }
@@ -302,7 +310,7 @@ function frame(ts) {
     }
     if (e.type === 'bandit') flash('BANDIT — ' + SKILLS[e.skill].name, HUD.red);
     if (e.type === 'hit') SFX.hit();
-    if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.6, hurtFlash + 0.25); }
+    if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.85, hurtFlash + 0.35); shake = Math.min(1, shake + e.dmg / 20); }
     if (e.type === 'enemy-missile') SFX.enemyLaunch();
     if (e.type === 'enemy-gun') SFX.enemyGun();
     if (e.type === 'shot-down') SFX.crash();
@@ -318,6 +326,11 @@ function frame(ts) {
   }
   missileFlash = Math.max(0, missileFlash - dt);
   hurtFlash = Math.max(0, hurtFlash - dt * 1.5);
+  shake = Math.max(0, shake - dt * 2.2);
+  if (world) world.shake = shake;
+  // Nearly dead: a slow alarm until you're fixed (respawn) or down.
+  critT -= dt;
+  if (!game.plane.crashed && game.hp > 0 && game.hp <= CONFIG.CRITICAL_HP && critT <= 0) { SFX.critical(); critT = 0.9; }
   // Warning tones: a slow beep while something locks you, fast and rising as a missile closes.
   warnT -= dt;
   if (warnT <= 0 && !game.plane.crashed) {

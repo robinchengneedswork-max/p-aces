@@ -81,11 +81,13 @@ function drawHud(ctx, W, H, st) {
   if (st.duel) drawDuelScore(ctx, W, H, st);
 
   if (st.recorder) drawRecorder(ctx, W, H, st);
-  else if (st.duel && !st.calib && duelOverlay(ctx, W, H, st)) { /* duel screen drawn */ }
-  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
+  // Calibration first: in a duel the loser's plane is still down when the next round's calibration
+  // starts, and SHOT DOWN used to draw over it.
   else if (st.calib && st.calib.phase === 'range') drawRangeSweep(ctx, W, H, st);
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
+  else if (st.duel && duelOverlay(ctx, W, H, st)) { /* duel screen drawn */ }
+  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
   else if (st.warn) {
     ctx.fillStyle = HUD.amber;
     ctx.font = 'bold 18px ' + HUD.font;
@@ -171,12 +173,11 @@ function drawSpeedLines(ctx, W, H, st) {
 function drawRangeSweep(ctx, W, H, st) {
   const sw = st.calib.sweep;
   bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
-    'Move to your COMFORTABLE limits: full pull, full push, roll left + right · left hand: high, low, turn both ways   (Esc skips)');
+    'Move to your COMFORTABLE limits: full pull, full push, roll left + right · left hand: all the way up and down   (Esc skips)');
   const reach = (xs, sign) => xs.reduce((m, v) => Math.max(m, v * sign), 0);
   const rows = [
     ['ROLL L', reach(sw.roll, -1)], ['ROLL R', reach(sw.roll, 1)],
     ['PUSH', reach(sw.pitch, st.settings.invertPitch ? 1 : -1)], ['PULL', reach(sw.pitch, st.settings.invertPitch ? -1 : 1)],
-    ['RUDDER L', reach(sw.yaw, -1)], ['RUDDER R', reach(sw.yaw, 1)],
   ];
   const x0 = W / 2 - 150, y0 = H * 0.62;
   ctx.font = '12px ' + HUD.font;
@@ -364,6 +365,11 @@ function drawThreats(ctx, W, H, st) {
   const g = st.game, m = g.warn.missile;
   const blink = Math.floor(st.now * 6) % 2 === 0;
   ctx.textAlign = 'center';
+  if (g.hp > 0 && g.hp <= CONFIG.CRITICAL_HP && blink) {
+    ctx.fillStyle = HUD.red;
+    ctx.font = 'bold 20px ' + HUD.font;
+    ctx.fillText('DAMAGE CRITICAL', W / 2, H * 0.7);
+  }
   if (m) {
     const [lo, hi] = CONFIG.BREAK_DIST;
     const brk = m.dist <= hi && m.dist >= lo * 0.6;
@@ -405,7 +411,10 @@ function drawTunnel(ctx, W, H, st) {
     // Greying out: the picture loses colour as it closes in.
     if (k > 0.6) { ctx.fillStyle = 'rgba(40,40,40,' + ((k - 0.6) * 0.5).toFixed(3) + ')'; ctx.fillRect(0, 0, W, H); }
   }
-  const red = Math.max(p.red * 0.45, st.hurt || 0);
+  // Nearly dead: a red border that pulses, stronger the lower you are.
+  const g = st.game, crit = !p.crashed && g.hp > 0 && g.hp <= CONFIG.CRITICAL_HP;
+  const pulse = crit ? (0.25 + 0.25 * (1 - g.hp / CONFIG.CRITICAL_HP)) * (0.6 + 0.4 * Math.sin(st.now * 7)) : 0;
+  const red = Math.max(p.red * 0.45, st.hurt || 0, pulse);
   if (red > 0) {
     const grad = ctx.createRadialGradient(W / 2, H / 2, diag * 0.4, W / 2, H / 2, diag);
     grad.addColorStop(0, 'rgba(160,0,0,0)');

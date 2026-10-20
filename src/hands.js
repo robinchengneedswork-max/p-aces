@@ -70,6 +70,8 @@ function measureHand(h) {
   // Knuckle line angle folded to ±90°, so left and right hands read the same:
   // + = rotated clockwise on the (mirrored) screen = bank right.
   let roll = Math.atan2(L[HL.PINKY_MCP].y - L[HL.INDEX_MCP].y, L[HL.PINKY_MCP].x - L[HL.INDEX_MCP].x);
+  // Unfolded (±180°): the rudder dial turns toward 90°, right where the folded angle flips sign.
+  const dial = roll;
   if (roll > Math.PI / 2) roll -= Math.PI;
   if (roll < -Math.PI / 2) roll += Math.PI;
 
@@ -93,7 +95,7 @@ function measureHand(h) {
   const open = reach / 4 / palmLen;
   const pinch = vDist(W[HL.THUMB_TIP], W[HL.INDEX_TIP]) / palmLen;
   // Stick axis from the image landmarks (best for roll) and the 3D world ones (bigger push/pull).
-  return { roll, pitch, cx, cy, scale, open, pinch, axI: ringAxis(L), axW: ringAxis(W) };
+  return { roll, dial, pitch, cx, cy, scale, open, pinch, axI: ringAxis(L), axW: ringAxis(W) };
 }
 
 // Two hands: split by screen side. One hand: once both roles have been seen, whichever role it
@@ -195,6 +197,8 @@ function flyAxes(m, n, s) {
 // Rudder from the other hand turned like a dial, before range calibration.
 function thrYaw(m, s) {
   const nt = s.neutral && s.neutral.thr;
+  // Against the unfolded rest angle when calibration recorded one (a 90° turn is unambiguous).
+  if (nt && nt.dial !== undefined) return wrapAngle(m.dial - nt.dial) / (s.yawRange * DEG);
   return foldHalf(m.roll - (nt ? nt.roll : 0)) / (s.yawRange * DEG);
 }
 
@@ -282,7 +286,8 @@ function controlsUpdate(c, hands, t, s, fresh = true) {
     // hold c.raw.yaw where it is
   } else if (c.thrM && s.thrRudder) {
     const nt = s.neutral && s.neutral.thr;
-    const yaw = applyRange(thrYaw(c.thrM, s), nt && nt.yaw);
+    // No range scaling here: the rudder is meant to need a big, deliberate turn (yawRange/yawDeadzone).
+    const yaw = thrYaw(c.thrM, s);
     c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
   } else {
     c.raw.yaw *= Math.exp(-CONFIG.HAND_LOST_DECAY * 2 * dt);
@@ -411,7 +416,6 @@ function rangeSweepFinish(sw, s) {
   }
   if (sw.cy.length >= C.RANGE_MIN_SAMPLES) {
     const nt = { ...(s.neutral.thr || { roll: 0 }) };
-    nt.yaw = [reach(sw.yaw, -1, 'rudder left'), reach(sw.yaw, 1, 'rudder right')];
     const top = quantile(sw.cy, 0.05), bottom = quantile(sw.cy, 0.95);
     if (bottom - top > C.THROTTLE_MIN_TRAVEL) {
       const inset = (bottom - top) * (1 - C.RANGE_USE) / 2;
@@ -429,7 +433,7 @@ function calibrateNeutral(s, hands) {
   const m = measureHand(fly);
   s.neutral = { ...(s.neutral || {}) };
   // The rudder hand's resting angle, if it's in view (shared by both schemes).
-  if (thr) s.neutral.thr = { ...(s.neutral.thr || {}), roll: measureHand(thr).roll };
+  if (thr) { const t = measureHand(thr); s.neutral.thr = { ...(s.neutral.thr || {}), roll: t.roll, dial: t.dial }; }
   const old = s.neutral[s.scheme];
   s.neutral[s.scheme] = { roll: m.roll, pitch: m.pitch, cx: m.cx, cy: m.cy, scale: m.scale, axI: m.axI, axW: m.axW, range: old && old.range };
   return true;

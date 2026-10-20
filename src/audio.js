@@ -79,6 +79,7 @@ const SFX = {
   hurt() { noiseBurst(0.12, 1800, 0.35, 300); },
   enemyGun() { noiseBurst(0.04, 1500, 0.05); },
   enemyLaunch() { tone(520, 0.35, 'sawtooth', 0.08, 1040); },
+  critical() { tone(440, 0.18, 'sawtooth', 0.06, 330); },
   warnLock() { tone(880, 0.12, 'square', 0.05); },
   warnMissile(close) { tone(close ? 1700 : 1300, 0.06, 'square', 0.07); },
 };

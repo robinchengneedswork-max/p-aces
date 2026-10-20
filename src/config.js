@@ -81,6 +81,8 @@ const CONFIG = {
 
   // Dogfight (B): one bandit at a time, rookie → regular → ace
   PLAYER_HP: 100,
+  CRITICAL_HP: 35,           // at or below: red pulse, DAMAGE CRITICAL, alarm
+  SMOKE_HP: 0.6,             // planes below this share of their HP trail smoke (yours, bandits, the duel opponent)
   BANDIT_R: 16,              // gun hit radius on a bandit (generous, like the drones)
   PLANE_HIT_R: 9,            // …and on you
   BANDIT_GUN_RATE: 8,        // rounds/s while it has a firing solution
@@ -151,7 +153,7 @@ const CONFIG = {
 
   DEFAULTS: {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
-    version: 8,
+    version: 9,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
     assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: RATE — the stick
                                           // sets how fast it rolls/pitches, hold it over = aileron roll
@@ -163,8 +165,9 @@ const CONFIG = {
     stickPitch: 18,          // stick: degrees of lean toward/away from the camera for full pitch
                              // (user kept turning 30 down; pulls on the recordings reach ~20-30°)
     thrRudder: true,         // turning the throttle hand like a dial = rudder (yaw)
-    yawRange: 30,            // degrees of throttle-hand turn for full rudder
-    yawDeadzone: 0.25,       // rudder ignores turns under this share of yawRange (~7.5° at 30°)
+    yawRange: 85,            // degrees of throttle-hand turn for full rudder…
+    yawDeadzone: 0.65,       // …and nothing under this share of it (~55°): rudder only when you really
+                             // turn the hand toward 90° (user: small turns made it hard to focus)
     deadzone: 0.12,
     expo: 1.4,
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
@@ -177,7 +180,7 @@ const CONFIG = {
     anime: false,            // T: anime look (24 fps cadence, cel shading, ink, speed lines)
     headLook: true,          // turn your head to look around (face tracking)
     headGain: 11,            // radians of view per unit of nose offset (face widths)
-    headDeadzone: 0.045,
+    headDeadzone: 0.065,     // (user: slightly higher than 0.045)
     headSmooth: 0.35,        // One Euro min cutoff for the head
     headSpring: 9,           // how stiffly the view chases the head (rad/s): settles in ~4/headSpring s
     headNeutral: null,       // { yaw, pitch } from calibration      // stick scheme: twisting the fist = rudder (leaks into rolls)
@@ -188,8 +191,8 @@ const CONFIG = {
     { key: 'pitchRange', label: 'Pitch: tilt for full (°)', min: 10, max: 70, step: 1 },
     { key: 'stickThrow', label: 'Stick: slide for full roll (palms)', min: 0.3, max: 3, step: 0.05 },
     { key: 'stickPitch', label: 'Stick: lean for full pitch (°)', min: 8, max: 60, step: 1 },
-    { key: 'yawRange', label: 'Rudder: left-hand turn for full (°)', min: 10, max: 60, step: 1 },
-    { key: 'yawDeadzone', label: 'Rudder deadzone', min: 0, max: 0.6, step: 0.01 },
+    { key: 'yawRange', label: 'Rudder: left-hand turn for full (°)', min: 10, max: 120, step: 1 },
+    { key: 'yawDeadzone', label: 'Rudder deadzone', min: 0, max: 0.9, step: 0.01 },
     { key: 'deadzone', label: 'Deadzone', min: 0, max: 0.4, step: 0.01 },
     { key: 'expo', label: 'Expo (1 = linear)', min: 1, max: 3, step: 0.05 },
     { key: 'minCutoff', label: 'Smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },

@@ -42,6 +42,7 @@
         <dt>G</dt><dd>record gestures</dd>
         <dt>D</dt><dd>hide this menu + camera view</dd>
         <dt>Enter</dt><dd>ready / rematch (duel)</dd>
+        <dt>Turret</dt><dd>both fists = grab the gun (fists down = muzzle up), shake = fire; arrows swing it, Space fires; turn your head to swing it further</dd>
       </dl>
     </details>
     <details class="menu-sec">
@@ -70,6 +71,7 @@
         <option value="dogfight">Dogfight (AI bandits, one at a time)</option>
         <option value="raid-109">Bomber escort, solo: fly the Bf 109 against AI P-51 escorts</option>
         <option value="raid-p51">Bomber escort, solo: fly a P-51 escort against AI 109s</option>
+        <option value="raid-gunner">Bomber gunner, solo: crew the lead bomber's top turret against AI 109s</option>
       </select>
     </div>
     <div class="plane-pick">
@@ -81,6 +83,7 @@
         <option value="p51">P-51D (fastest; six .50s)</option>
       </select>
       <label class="small"><input type="checkbox" id="min-hud"> Minimal HUD (no markers: find them yourself)</label>
+      <label class="small"><input type="checkbox" id="reload-guns"> Reload when empty (WW2: 8 s MG, 12 s cannon)</label>
     </div>
     <p class="small" id="ww2-note">WW2 planes fly a less arcade model: real G limits (over-stress the wing and it breaks), energy
       matters more, no lead marker (walk your tracers on), limited ammo. <b>Pinch</b> = machine guns, <b>fist</b> = everything
@@ -126,6 +129,7 @@
 <script src="src/duel.js"></script>
 <script src="src/escort.js"></script>
 <script src="src/raid.js"></script>
+<script src="src/gunner.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>

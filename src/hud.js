@@ -23,6 +23,8 @@ function drawHud(ctx, W, H, st) {
   ctx.textBaseline = 'middle';
 
   const minimal = st.settings.minHud;
+  if (g.crew) drawCrew(ctx, W, H, st);   // in a bomber's turret: its own sight and readouts
+  else {
   if (!p.crashed) {
     if (!minimal) drawLadder(ctx, W, H, st);
     // Gun pipper: where rounds will be in ~0.7 s. WW2: a fixed reflector sight instead.
@@ -52,6 +54,7 @@ function drawHud(ctx, W, H, st) {
 
   drawInputs(ctx, W, H, st);
   if (st.camera && st.head) drawLook(ctx, W, H, st.head.look);
+  }
 
   ctx.textAlign = 'left';
   ctx.fillStyle = HUD.green;
@@ -100,6 +103,7 @@ function drawHud(ctx, W, H, st) {
     bigText(ctx, W, H, (o.winner === 'attacker' ? 'THE 109 WINS' : 'THE ESCORTS WIN') + (won ? ' — YOU WIN' : ''), won ? HUD.green : HUD.red,
       (o.why === 'bombers' ? g.solo.need + ' bombers down' : o.why === 'time' ? 'the bombers reached the target' : 'the 109s are out of the fight') + ' · R to fly it again');
   }
+  else if (g.crew && g.crew.downT > 0) bigText(ctx, W, H, g.crew.b.alive ? 'TURRET HIT' : 'YOUR BOMBER IS GOING DOWN', HUD.red, 'moving to the next bomber…');
   else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : p.wingFailed ? 'WING FAILURE' : 'CRASHED', HUD.red, g.mode === 'duel' || g.solo ? '' : 'respawning…');
   else if (st.warn) {
     ctx.fillStyle = HUD.amber;
@@ -369,6 +373,56 @@ function drawDuelScore(ctx, W, H, st) {
   ctx.fillText(me.name.toUpperCase() + '  ' + me.score + ' — ' + (op ? op.score : 0) + '  ' + (op ? op.name.toUpperCase() : '…'), W / 2, 70);
 }
 
+// Crewing a turret (gunner.js): the twin guns' barrels, a ring sight down them, the 109s marked,
+// the belt, and (on camera) whether you're holding the grips and how hard you're shaking them.
+function drawCrew(ctx, W, H, st) {
+  const g = st.game, c = g.crew;
+  if (c.downT > 0) return;
+  const s = projectToScreen(st.world, vAdd(c.at, vScale(c.dir, 600)), W, H);
+  if (s.on) {
+    // Barrels from the bottom of the view toward the sight.
+    ctx.fillStyle = '#1b1f26';
+    for (const k of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(W / 2 + k * W * 0.09 - 14, H + 4); ctx.lineTo(W / 2 + k * W * 0.09 + 14, H + 4);
+      ctx.lineTo(s.x + k * 16 + 3, s.y + 70); ctx.lineTo(s.x + k * 16 - 3, s.y + 70);
+      ctx.fill();
+    }
+    ctx.strokeStyle = HUD.amber;
+    ctx.fillStyle = c.assisted ? HUD.green : HUD.amber;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 46, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath(); ctx.arc(s.x, s.y, 23, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(s.x, s.y, c.assisted ? 5 : 2, 0, Math.PI * 2); ctx.fill();
+  }
+  if (st.settings.minHud) drawContacts(ctx, W, H, st); else drawBandits(ctx, W, H, st);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 14px ' + HUD.font;
+  ctx.fillStyle = c.reloadT > 0 ? HUD.amber : c.ammo < CONFIG.CREW_BELT * 0.2 ? HUD.amber : HUD.green;
+  ctx.fillText(c.reloadT > 0 ? 'CHANGING BELT ' + Math.ceil(c.reloadT) + 's' : 'BELT ' + c.ammo, W - 24, H - 60);
+  ctx.font = '12px ' + HUD.font;
+  ctx.fillStyle = HUD.green;
+  ctx.fillText('TOP TURRET · AZ ' + Math.round(c.az / DEG) + '° · EL ' + Math.round(c.el / DEG) + '°', W - 24, H - 40);
+  const gi = st.gunner;
+  if (st.camera && gi) {
+    // Shake meter: fires past the tick.
+    const k = clamp(gi.shake / (CONFIG.SHAKE_ON * 2), 0, 1);
+    ctx.strokeStyle = HUD.green;
+    ctx.strokeRect(W - 184, H - 30, 160, 8);
+    ctx.fillStyle = gi.fire ? HUD.red : HUD.green;
+    ctx.fillRect(W - 183, H - 29, 158 * k, 6);
+    ctx.fillStyle = HUD.amber;
+    ctx.fillRect(W - 184 + 80, H - 33, 2, 14);
+    if (!gi.grip) {
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 18px ' + HUD.font;
+      ctx.fillText('GRAB THE GUN — both fists in view, shake them to fire', W / 2, H * 0.72);
+    }
+  }
+}
+
 // Escort mission status (LAN or solo): bombers down, the 109's lives, time to the target, your
 // role, and while you're down how long until you're back (back = time down so far, null = not shown).
 function drawEscortStatus(ctx, W, H, g, m, back) {
@@ -381,7 +435,7 @@ function drawEscortStatus(ctx, W, H, g, m, back) {
   }
   ctx.font = 'bold 14px ' + HUD.font;
   ctx.fillStyle = g.team === 'attacker' ? HUD.red : HUD.cyan;
-  if (g.team) ctx.fillText(g.team === 'attacker' ? 'YOU: BF 109 — down the bombers' : 'YOU: P-51 ESCORT — protect the bombers', W / 2, 92);
+  if (g.team) ctx.fillText(g.team === 'attacker' ? 'YOU: BF 109 — down the bombers' : g.crew ? 'YOU: TOP GUNNER — keep the 109s off the bombers' : 'YOU: P-51 ESCORT — protect the bombers', W / 2, 92);
   if (g.plane.crashed && back !== null) {
     const left = Math.max(0, CONFIG.ESCORT_RESPAWN - back);
     ctx.fillText(g.team === 'attacker' && m && m.lives <= 0 ? '' : 'BACK IN ' + Math.ceil(left), W / 2, H * 0.36);
@@ -578,8 +632,9 @@ function drawGauges(ctx, W, H, st) {
       let left = 0, full = 0;
       S.GUNS.forEach((gn, i) => { if (gn.group === grp) { left += p.ammo[i]; full += gn.ammo; } });
       if (!full) continue;
-      ctx.fillStyle = left === 0 ? HUD.red : left < full * 0.25 ? HUD.amber : HUD.green;
-      ctx.fillText((grp === 'mg' ? 'MG ' : 'CANNON ') + (left === 0 ? 'EMPTY' : Math.round(left / full * 100) + '%'), W * 0.8, cy + 32 + row * 16);
+      const rl = p.reloadT && p.reloadT[grp] > 0 ? p.reloadT[grp] : 0;
+      ctx.fillStyle = rl ? HUD.amber : left === 0 ? HUD.red : left < full * 0.25 ? HUD.amber : HUD.green;
+      ctx.fillText((grp === 'mg' ? 'MG ' : 'CANNON ') + (rl ? 'RELOAD ' + Math.ceil(rl) + 's' : left === 0 ? 'EMPTY' : Math.round(left / full * 100) + '%'), W * 0.8, cy + 32 + row * 16);
       row++;
     }
   } else ctx.fillText('MSL ' + (st.game.missileCd > 0 ? 'RELOAD' : 'READY'), W * 0.8, cy + 32);

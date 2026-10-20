@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js', 'raid.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, createRaid, raidForm, raidRules, hitBomber, makeRng, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js', 'raid.js', 'gunner.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, createRaid, raidForm, createGunnerInput, gunnerInputUpdate, raidRules, hitBomber, makeRng, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -1235,6 +1235,113 @@ console.log('solo escort');
   q.solo.left = 0.01;
   X.gameUpdate(q, idle, DT);
   check('time up: the bombers reach the target, escorts win', q.solo.over && q.solo.over.winner === 'escort' && q.solo.over.why === 'time');
+}
+
+console.log('turret grip (two fists)');
+{
+  const s = settings();
+  const fists = (cx, cy, size = 1) => [hand({ fist: true, cx: cx - 0.1, cy, size }), hand({ fist: true, left: true, cx: cx + 0.1, cy, size })];
+  // 20 readings a second; fn(i) gives the hands at reading i.
+  const feed = (gi, fn, n, t0 = 0) => { for (let i = 0; i < n; i++) X.gunnerInputUpdate(gi, fn(i), t0 + i / 20, s); return gi; };
+  const gi = X.createGunnerInput();
+  feed(gi, () => fists(0.5, 0.55), 10);
+  check('two fists in view = holding the gun, not firing', gi.grip && !gi.fire && Math.abs(gi.az) < 1e-6 && Math.abs(gi.el) < 1e-6);
+  // Pivot: fists down 10% of the frame = muzzle up by gunnerGain; fists right = muzzle left.
+  feed(gi, () => fists(0.5, 0.65), 30, 1);
+  check('fists down = muzzle up (pivot), ' + s.gunnerGain + '° per 10% of the frame', near(gi.el / DEG, s.gunnerGain, 1), (gi.el / DEG).toFixed(1) + '°');
+  feed(gi, () => fists(0.6, 0.65), 30, 3);
+  check('fists right = muzzle left', near(gi.az / DEG, -s.gunnerGain, 1), (gi.az / DEG).toFixed(1) + '°');
+  // Let go, grab again somewhere else: the gun stays put (a clutch).
+  const az = gi.az, el = gi.el;
+  feed(gi, () => [hand({ cx: 0.4, cy: 0.5 }), hand({ left: true, cx: 0.6, cy: 0.5 })], 20, 5);
+  check('open hands: let go of the gun (after ' + CONFIG.GRIP_HOLD + ' s)', !gi.grip);
+  feed(gi, () => fists(0.3, 0.4), 10, 7);
+  check('grab it again anywhere: it stays where it was', gi.grip && near(gi.az, az, 1e-6) && near(gi.el, el, 1e-6));
+  // Shake = fire; a deliberate swing doesn't; the shake hardly moves the aim.
+  const sw = X.createGunnerInput();
+  feed(sw, i => fists(0.4 + i * 0.01, 0.55), 30);   // 0.2 of the frame per second
+  check('a steady swing does not fire', !sw.fire, 'shake ' + sw.shake.toFixed(3));
+  const jt = X.createGunnerInput();
+  let jFired = false;
+  feed(jt, () => { jFired = jFired || jt.fire; return [hand({ fist: true, cx: 0.4, cy: 0.55, jitter: 0.008 }), hand({ fist: true, left: true, cx: 0.6, cy: 0.55, jitter: 0.008 })]; }, 100);
+  check('holding still with tracking jitter (±4 px) does not fire', !jFired, 'shake ' + jt.shake.toFixed(3));
+  const sh = X.createGunnerInput();
+  feed(sh, () => fists(0.5, 0.55), 10);
+  const a0 = sh.el;
+  let firedAt = null;
+  feed(sh, i => { if (sh.fire && firedAt === null) firedAt = i; return fists(0.5, 0.55 + (i % 2 ? 0.02 : -0.02)); }, 20, 1);
+  check('shaking the fists fires within ~0.3 s', sh.fire && firedAt !== null && firedAt <= 6, 'reading ' + firedAt);
+  check('…and barely moves the aim', Math.abs(sh.el - a0) < 3 * DEG, ((sh.el - a0) / DEG).toFixed(1) + '°');
+  const sd = X.createGunnerInput();
+  feed(sd, () => fists(0.5, 0.55), 10);
+  feed(sd, i => fists(0.5, 0.55, i % 2 ? 1.12 : 0.9), 20, 1);
+  check('…shaking toward and away from the camera fires too', sd.fire);
+  feed(sh, () => fists(0.5, 0.55), 20, 3);
+  check('hold still: firing stops', !sh.fire);
+  const np = X.createGunnerInput();
+  const s2 = { ...s, gunnerPivot: false };
+  for (let i = 0; i < 30; i++) X.gunnerInputUpdate(np, i < 10 ? fists(0.5, 0.55) : fists(0.5, 0.65), i / 20, s2);
+  check('pivot off: fists down = muzzle down', np.el < -10 * DEG);
+}
+
+console.log('turret (solo gunner)');
+{
+  const DT = 1 / 60;
+  const g = X.createRaid(31, 'gunner');
+  const c = g.crew;
+  check("you crew the lead bomber's top turret; its AI gunner stands down", c && c.b === g.bombers[0] && c.gu.human && g.plane === c.b.plane && g.team === 'escort');
+  check('…you are not a plane anyone can shoot at', !g.player.alive);
+  // The turret swings at CREW_SLEW, and stays above the wings.
+  X.gameUpdate(g, { gunAz: Math.PI / 2, gunEl: -1 }, 0.5);
+  check('the turret drive swings at ' + CONFIG.CREW_SLEW + ' rad/s', near(c.az, CONFIG.CREW_SLEW * 0.5, 0.01), (c.az / DEG).toFixed(0) + '°');
+  for (let i = 0; i < 60; i++) X.gameUpdate(g, { gunAz: Math.PI / 2, gunEl: -1 }, DT);
+  check('…and never points down into its own wings', near(c.el, CONFIG.CREW_EL_MIN, 1e-6));
+  // Fire: rounds leave the turret and fly clear of your own bomber.
+  const hp = g.bombers.map(b => b.hp);
+  g.bullets = [];
+  for (let i = 0; i < 30; i++) X.gameUpdate(g, { gunAz: 0, gunEl: 0.5, gun: true }, DT);
+  const mine = g.bullets.filter(b => b.owner === 'player');
+  check('Space / a shake fires the twin guns from the turret', mine.length >= 3 && mine.every(b => b.from === c.b.id));
+  check('…without hitting your own bomber', g.bombers[0].hp === hp[0]);
+  // The belt runs out, then CREW_RELOAD s to change it.
+  c.ammo = 1;
+  X.gameUpdate(g, { gunAz: 0, gunEl: 0.5, gun: true }, DT);
+  X.gameUpdate(g, { gunAz: 0, gunEl: 0.5, gun: true }, DT);
+  check('belt empty: changing it', c.ammo === 0 && c.reloadT > 0);
+  for (let t = 0; t < CONFIG.CREW_RELOAD + 0.1; t += DT) X.gameUpdate(g, { gunAz: 0, gunEl: 0.5 }, DT);
+  check('…a new belt after ' + CONFIG.CREW_RELOAD + ' s', c.ammo === CONFIG.CREW_BELT);
+  // The assist bends rounds onto a 109 close to the sight's line.
+  const b109 = g.bandits[0];
+  b109.pos = b109.plane.pos = X.vAdd(c.at, X.vScale(X.vRotate(c.dir, c.b.plane.up, 3 * DEG), 400));
+  b109.vel = { ...c.b.vel };
+  X.gameUpdate(g, { gunAz: c.az, gunEl: c.el, gunAssist: 3.5 }, DT);
+  check('the gun assist takes a 109 3° off the sight', c.assisted && c.sol.target === b109);
+  X.gameUpdate(g, { gunAz: c.az, gunEl: c.el, gunAssist: 0 }, DT);
+  check('…not with the assist off', !c.assisted);
+  // Your turret shot out: after ESCORT_RESPAWN you move to the next bomber's.
+  c.gu.hp = 0;
+  const old = c.b;
+  X.gameUpdate(g, { gunAz: 0, gunEl: 0.5 }, DT);
+  check('turret hit: you are out of it', g.events.some(e => e.type === 'turret-out'));
+  for (let t = 0; t < CONFIG.ESCORT_RESPAWN + 0.1; t += DT) X.gameUpdate(g, { gunAz: 0, gunEl: 0.5 }, DT);
+  check('…and take over the next top turret', g.crew.b !== old && g.crew.b.alive && g.crew.gu.human && !old.gunners[0].human && g.plane === g.crew.b.plane);
+}
+
+console.log('reloading (WW2 fighters)');
+{
+  const ctl = (o) => ({ roll: 0, pitch: 0, yaw: 0, throttle: 0.6, gun: false, cannon: false, missile: false, ...o });
+  const ammoOf = (p, grp) => p.spec.GUNS.reduce((n, gn, i) => n + (gn.group === grp ? p.ammo[i] : 0), 0);
+  const run = reload => {
+    const g = X.createGame(41, 'duel', 'bf109');
+    const p = g.plane;
+    for (let i = 0; i < 60 * 9; i++) X.gameUpdate(g, ctl({ cannon: true, reload }), 1 / 60);
+    const dry = ammoOf(p, 'cannon');
+    for (let i = 0; i < 60 * (CONFIG.RELOAD.cannon + 1); i++) X.gameUpdate(g, ctl({ reload }), 1 / 60);
+    return { dry, after: ammoOf(p, 'cannon'), full: p.spec.GUNS.filter(gn => gn.group === 'cannon').reduce((a, gn) => a + gn.ammo, 0) };
+  };
+  const on = run(true), off = run(false);
+  check('cannons run dry, then reload after ' + CONFIG.RELOAD.cannon + ' s', on.dry === 0 && on.after === on.full);
+  check('…unless reloading is off', off.dry === 0 && off.after === 0);
 }
 
 console.log('game');

@@ -11,12 +11,14 @@ let controls = createControls();
 // game), or solo bomber escort 'raid-109' / 'raid-p51' (raid.js). ?dogfight starts in dogfight.
 function newGame(kind) {
   const seed = Date.now() % 100000;
-  if (kind === 'raid-109' || kind === 'raid-p51') return createRaid(seed, kind === 'raid-109' ? 'attacker' : 'escort');
+  if (kind === 'raid-109' || kind === 'raid-p51' || kind === 'raid-gunner') return createRaid(seed, { 'raid-109': 'attacker', 'raid-p51': 'escort', 'raid-gunner': 'gunner' }[kind]);
   return createGame(seed, kind === 'dogfight' ? 'dogfight' : 'range', settings.plane);
 }
 function gameKind(g) {
-  return g.solo ? (g.solo.role === 'attacker' ? 'raid-109' : 'raid-p51') : g.mode;
+  return g.solo ? { attacker: 'raid-109', escort: 'raid-p51', gunner: 'raid-gunner' }[g.solo.role] : g.mode;
 }
+let gunIn = createGunnerInput();          // crewing a turret: the two-fist grip (gunner.js)
+let kbGun = { az: 0, el: 20 * DEG };      // …and the arrow keys' share of where the gun points
 let game = newGame(new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range');
 let world = null;
 let mode = 'camera';         // 'camera' | 'keyboard'
@@ -277,13 +279,21 @@ function frame(ts) {
       face = res.face ? res.face.map(k => ({ x: 1 - k.x, y: k.y })) : null;
       headUpdate(head, face, now, settings);
       if (calib && calib.phase === 'range') rangeSweepAdd(calib.sweep, hands, settings);
-      if (clapUpdate(clap, hands, now) && !recorder && !calib) {
+      if (clapUpdate(clap, hands, now) && !recorder && !calib && !game.crew) {   // (a turret's shaking fists aren't claps)
         flash('CLAP CLAP — CALIBRATING', HUD.green);
         startCalibration(CONFIG.CLAP_COUNTDOWN);
       }
     }
   }
   if (camera) controlsUpdate(controls, hands, now, settings, fresh);
+  if (camera && game.crew) gunnerInputUpdate(gunIn, hands, now, settings, fresh);
+  if (game.crew) {
+    // Arrows swing the gun (the hands and the head add to them).
+    const ax = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0), ay = (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0);
+    kbGun.az += ax * 1.2 * dt;
+    kbGun.el = clamp(kbGun.el + ay * 0.9 * dt, CONFIG.CREW_EL_MIN, CONFIG.CREW_EL_MAX);
+  }
+  const headOn = camera && settings.headLook;
   if (camera) headFollow(head, dt, settings);
   if (recorder) {
     recorderStep(recorder, now);
@@ -301,7 +311,10 @@ function frame(ts) {
     pitch: useKb ? kb.pitch : controls.out.pitch,
     yaw: useKb ? kb.yaw : controls.out.yaw,
     throttle: camera ? controls.out.throttle : kb.throttle,
-    gun: keys.has('Space') || (camera && controls.out.gun),
+    gun: keys.has('Space') || (camera && (game.crew ? gunIn.grip && gunIn.fire : controls.out.gun)),
+    gunAz: kbGun.az + (camera ? gunIn.az : 0) + (headOn ? head.look.yaw : 0),
+    gunEl: kbGun.el + (camera ? gunIn.el : 0) + (headOn ? head.look.pitch : 0),
+    reload: settings.reload,
     cannon: keys.has('ShiftLeft') || keys.has('ShiftRight') || (camera && controls.out.cannon),
     gunAssist: settings.gunAssist,
     missile: (camera && controls.out.missile) || keys.has('KeyF'),
@@ -354,6 +367,10 @@ function frame(ts) {
     if (e.type === 'bomber-crash') SFX.crash();
     if (e.type === 'gunner-down') flash(e.name + ' GUNNER OUT', HUD.green);
     if (e.type === 'bandit') flash((game.solo ? '109 INBOUND — ' : 'BANDIT — ') + SKILLS[e.skill].name, HUD.red);
+    if (e.type === 'reload-start') flash(e.group === 'belt' ? 'CHANGING BELT' : (e.group === 'mg' ? 'MG' : 'CANNON') + ' EMPTY — RELOADING', HUD.amber);
+    if (e.type === 'reloaded') flash(e.group === 'belt' ? 'NEW BELT' : (e.group === 'mg' ? 'MG' : 'CANNON') + ' RELOADED', HUD.green);
+    if (e.type === 'turret-out') { SFX.crash(); flash(e.how === 'hit' ? 'YOU ARE HIT' : 'BOMBER GOING DOWN — BAIL OUT', HUD.red); }
+    if (e.type === 'crew-move') flash('YOU TAKE OVER THE NEXT TOP TURRET', HUD.cyan);
     if (e.type === 'raid-over') { SFX.ring(); flash(e.winner === game.team ? 'MISSION WON' : 'MISSION LOST', e.winner === game.team ? HUD.green : HUD.red); }
     if (e.type === 'hit') SFX.hit();
     if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.85, hurtFlash + 0.35); shake = Math.min(1, shake + e.dmg / 20); }
@@ -407,7 +424,7 @@ function frame(ts) {
   if (draw) {
     const view = Object.create(game);
     view.events = pendingEvents;
-    renderWorld(world, view, sinceDraw, now, camera ? head.look : null, ctrl);
+    renderWorld(world, view, sinceDraw, now, camera && !game.crew ? head.look : null, ctrl);   // (a turret: the head swings the gun)
     pendingEvents = [];
     sinceDraw = 0;
     perf.draws++;
@@ -421,7 +438,7 @@ function frame(ts) {
   else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
   if (draw) drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
-    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash, duel,
+    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash, duel, gunner: gunIn,
     status: camera ? statusLine() : '',
     perf: perfLine(camera),
   });
@@ -525,11 +542,14 @@ async function start(useCamera, duelOpts) {
   document.body.classList.toggle('debug', debug);
   if (!duelOpts) {
     game = newGame(modePick.value);
-    if (game.solo) flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers; the formation is below, ahead'
+    gunIn = createGunnerInput();
+    kbGun = { az: 0, el: 20 * DEG };
+    if (game.crew) flash('TOP GUNNER — grab the gun with both fists, shake them to fire', HUD.cyan);
+    else if (game.solo) flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers; the formation is below, ahead'
       : 'ESCORT — keep the 109s off the bombers', game.team === 'attacker' ? HUD.red : HUD.cyan);
   }
   if (duelOpts) duelConnect(duelOpts.name, duelOpts.host, duelOpts.mode);
-  else if (useCamera && !isCalibrated(settings)) startCalibration();
+  else if (useCamera && !isCalibrated(settings) && !game.crew) startCalibration();   // (a turret needs no calibration: grabbing it is the centre)
   requestAnimationFrame(frame);
 }
 
@@ -544,7 +564,9 @@ function toggle(key, a, b, text) {
 // Start screen: mode, plane and minimal HUD.
 const modePick = document.getElementById('mode-pick');
 if (new URLSearchParams(location.search).has('dogfight')) modePick.value = 'dogfight';
-const planePick = document.getElementById('plane-pick'), minHudBox = document.getElementById('min-hud');
+const planePick = document.getElementById('plane-pick'), minHudBox = document.getElementById('min-hud'), reloadBox = document.getElementById('reload-guns');
+reloadBox.checked = settings.reload !== false;
+reloadBox.addEventListener('change', () => { settings.reload = reloadBox.checked; saveSettings(); });
 planePick.value = PLANES[settings.plane] ? settings.plane : DEFAULT_PLANE;
 minHudBox.checked = !!settings.minHud;
 planePick.addEventListener('change', () => {
@@ -595,7 +617,7 @@ window.addEventListener('keydown', e => {
     if (duel.phase === 'calib') { calib = null; duelReady(); }
     if (duel.phase === 'over') duelSend({ t: 'rematch' });
   }
-  if (e.code === 'KeyR' && !duel) { game = newGame(gameKind(game)); flash(game.solo ? 'NEW MISSION' : 'RESET', HUD.ink); }
+  if (e.code === 'KeyR' && !duel) { game = newGame(gameKind(game)); gunIn = createGunnerInput(); kbGun = { az: 0, el: 20 * DEG }; flash(game.solo ? 'NEW MISSION' : 'RESET', HUD.ink); }
   if (e.code === 'KeyN' && !duel && !game.solo) {
     if (game.bombers.filter(b => b.alive).length < CONFIG.BOMBER_MAX) spawnBomber(game);
     else flash('BOMBERS: ' + CONFIG.BOMBER_MAX + ' AT ONCE', HUD.dim);

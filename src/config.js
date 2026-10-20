@@ -163,6 +163,21 @@ const CONFIG = {
   ESCORT_RESPAWN: 5,         // s before you're back in (the 109 high above, escorts by the formation)
   ESCORT_SEND_HZ: 20,        // bomber states from the server
   // Solo escort (raid.js): AI pilots for the other side.
+  RELOAD: { mg: 8, cannon: 12 },   // s to rearm a gun group once it runs dry (settings.reload)
+  // Crewing a bomber's top turret (gunner.js; solo escort role 'gunner').
+  CREW_TURRET: 0,            // BOMBER_GUNNERS index: the top turret (the 109s dive from above)
+  CREW_RATE: 10,             // rounds/s, twin .50s
+  CREW_POWER: 0.4,
+  CREW_BELT: 250,            // rounds (~25 s of fire), then…
+  CREW_RELOAD: 5,            // …s to change the belt
+  CREW_SLEW: 1.6,            // rad/s: the turret's drive (also smooths hand jitter)
+  CREW_EL_MIN: 2 * DEG, CREW_EL_MAX: 85 * DEG,
+  CREW_ASSIST_SCALE: 1.5,    // × the gun-assist slider (the same as the WW2 fighters' hidden assist)
+  CREW_ASSIST_RANGE: 700,    // m: the gun assist (slider x ASSIST_SCALE) bends rounds onto the lead inside this
+  GRIP_HOLD: 0.3,            // s a lost hand keeps its grip (blur, a dropped frame)
+  AIM_SMOOTH: 0.12,          // s: the fists' position is smoothed this much for aiming (shaking mustn't aim)
+  SHAKE_ON: 0.15, SHAKE_OFF: 0.08,   // fist jolt (palm lengths per reading, smoothed): fire above ON, stop below OFF
+  SHAKE_SMOOTH: 0.2,         // s
   RAID_ESCORTS: 3,           // AI P-51s with the bombers when you fly the 109 (a regular + rookies)
   RAID_109S: 6,              // AI 109s you must get through when you fly escort…
   RAID_109_AT_ONCE: 3,       // …this many in the air at a time
@@ -229,6 +244,10 @@ const CONFIG = {
     hand: 'right',           // the hand that flies; the other one is throttle + weapons
     plane: 'jet',            // planes.js type (start screen / K)
     minHud: false,           // U: no target markers or arrows, no ladder: find them yourself
+    reload: true,            // a gun group that runs dry rearms after RELOAD s (start screen)
+    gunnerGain: 20,          // turret: degrees of swing per 10% of the frame the fists move
+    gunnerShake: 1,          // turret: shake-to-fire sensitivity (higher = a smaller shake fires)
+    gunnerPivot: true,       // turret: fists down = muzzle up, like a pivoting gun (false = the muzzle follows the fists)
     version: 9,
     scheme: 'stick',          // 'flat' (tilt a flat hand) | 'stick' (grip a fake stick)
     assist: { flat: true, stick: false }, // per scheme. true: hand angle = bank angle. false: RATE — the stick
@@ -283,6 +302,8 @@ const CONFIG = {
     { key: 'headSmooth', label: 'Head smooth (min cutoff)', min: 0.1, max: 3, step: 0.1 },
     { key: 'gunAssist', label: 'Gun assist (° of magnetism, 0 = off)', min: 0, max: 8, step: 0.5 },
     { key: 'headSpring', label: 'Head look glide (higher = snappier)', min: 3, max: 20, step: 0.5 },
+    { key: 'gunnerGain', label: 'Turret: swing per 10% of frame (°)', min: 5, max: 45, step: 1 },
+    { key: 'gunnerShake', label: 'Turret: shake-to-fire sensitivity', min: 0.3, max: 3, step: 0.1 },
   ],
   STORAGE_KEY: 'sky-ace-settings',
 };

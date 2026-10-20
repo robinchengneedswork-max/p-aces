@@ -58,7 +58,7 @@ function syncPlayer(g) {
   const P = g.player, p = g.plane;
   P.pos = p.pos;
   P.vel = planeVelocity(p);
-  P.alive = !p.crashed;
+  P.alive = !p.crashed && !g.crew;   // (crewing a turret, you are not a plane anyone shoots at)
   P.plane = p;
 }
 
@@ -194,7 +194,7 @@ function updateGunners(g, b, dt) {
   const P = b.plane;
   for (const gu of b.gunners) {
     gu.firing = false;
-    if (gu.hp <= 0) continue;
+    if (gu.hp <= 0 || gu.human) continue;   // (human: you crew it, gunner.js)
     // The nearest target it can bear on; a new target starts its aim over.
     let Y = null, best = Infinity;
     for (const t of g.gunTargets || [g.player]) {
@@ -377,6 +377,26 @@ function fireGuns(g, p, triggers, dt, owner, ammo, aim) {
   return fired;
 }
 
+// Reloading (settings.reload): a gun group that has run dry (all its guns empty) is rearmed
+// RELOAD[group] s later. p.reloadT[group] = seconds left while it's at it.
+function reloadGuns(g, p, dt) {
+  p.reloadT = p.reloadT || {};
+  for (const grp of ['mg', 'cannon']) {
+    const idx = p.spec.GUNS.map((gn, i) => gn.group === grp ? i : -1).filter(i => i >= 0);
+    if (!idx.length) continue;
+    if (!(p.reloadT[grp] > 0)) {
+      if (idx.every(i => p.ammo[i] <= 0)) { p.reloadT[grp] = CONFIG.RELOAD[grp]; g.events.push({ type: 'reload-start', group: grp, pos: p.pos }); }
+      continue;
+    }
+    p.reloadT[grp] -= dt;
+    if (p.reloadT[grp] <= 0) {
+      p.reloadT[grp] = 0;
+      for (const i of idx) p.ammo[i] = p.spec.GUNS[i].ammo;
+      g.events.push({ type: 'reloaded', group: grp, pos: p.pos });
+    }
+  }
+}
+
 function fireBullet(g, from, dir, owner) {
   const side = (g.bullets.length % 2 ? 1 : -1) * 3;
   g.bullets.push({ pos: vAdd(from.pos, vScale(from.right, side)), vel: vAdd(vScale(dir, CONFIG.GUN_SPEED), planeVelocity(from)), age: 0, owner });
@@ -405,7 +425,8 @@ function gameUpdate(g, ctrl, dt) {
   const p = g.plane;
   g.events.length = 0;
 
-  if (p.crashed) {
+  if (g.crew) crewStep(g, ctrl, dt);   // in a bomber's turret (gunner.js): no flying
+  else if (p.crashed) {
     if (g.respawnT === 0) {
       if (p.shotDown) g.deaths++; else g.crashes++;
       g.events.push({ type: p.shotDown ? 'shot-down' : 'crash', pos: p.pos });
@@ -426,6 +447,7 @@ function gameUpdate(g, ctrl, dt) {
       const fired = fireGuns(g, p, { mg: ctrl.gun, cannon: ctrl.cannon }, dt, 'player', true, g.gunAssisted ? sol.dir : null);
       if (fired.mg) g.events.push({ type: 'gun', pos: p.pos });
       if (fired.cannon) g.events.push({ type: 'cannon', pos: p.pos });
+      if (ctrl.reload) reloadGuns(g, p, dt);
     } else {
       g.gunAcc = ctrl.gun ? g.gunAcc + dt * CONFIG.GUN_RATE : Math.min(g.gunAcc, 1);
       while (ctrl.gun && g.gunAcc >= 1) {
@@ -564,7 +586,7 @@ function updateBullets(g, dt) {
         if (t.alive && segPointDist(prev, b.pos, t.pos) < (t.plane.spec.HIT_R ?? CONFIG.BANDIT_R)) { hitBandit(g, t, power, 'gun'); b.age = 99; break; }
       }
       for (const t of g.bombers) {
-        const part = b.age < 99 && t.alive && bomberHit(t, prev, b.pos, 0);
+        const part = b.age < 99 && t.alive && t.id !== b.from && bomberHit(t, prev, b.pos, 0);   // (from: your own bomber, crewing it)
         if (!part) continue;
         // Escort: the server keeps the bombers; tell it (and show the spark here).
         if (g.bombersRemote) g.events.push({ type: 'bomber-hit', id: t.id, part: CONFIG.BOMBER_PARTS.indexOf(part), dmg: power, pos: b.pos }, { type: 'hit', pos: b.pos });

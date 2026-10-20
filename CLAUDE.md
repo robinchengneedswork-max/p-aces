@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (268 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (294 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 `node test/duel.js` (22 checks: the LAN duel server with real WebSocket clients) and `node test/planes.js [report]`
 (19 checks: WW2 flight models) and `node test/escort.js` (16 checks: the bomber-escort room over real sockets).
@@ -402,3 +402,28 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     default) and `GUN_ASSIST_RANGE` 600 m the guns converge on the solution (`fireGuns` aim). Cue: the
     reflector's centre dot swells green. Works in duels/escort too (shooter-decided hits).
   - Not yet flown by the user.
+- **Round 25 (2026-10-20): crew a bomber turret, reload when empty, Keys & settings menu.**
+  - User's turret design: "two hands in a fist to grab the gun, shake back and forth to shoot, bring the
+    fists down and it pivots and the front goes up … pivot with head?" `gunner.js`: both fists (FIST_ON/OFF
+    hysteresis, GRIP_HOLD 0.3 s through dropouts) = holding the grips. Aim = smoothed fist midpoint
+    (AIM_SMOOTH 0.12 s) relative to where you grabbed, `gunnerGain` 20° per 10% of the frame, pivot
+    (`gunnerPivot`: fists down = muzzle up, right = left); re-grabbing is a clutch (the gun stays put).
+    Fire = jolt: second difference of the raw midpoint + log fist size per reading, in palm lengths,
+    smoothed 0.2 s, on > SHAKE_ON 0.15 / off < 0.08 × `gunnerShake`. Tests: a steady 0.2 frame/s swing and
+    ±4 px jitter don't fire; a ±0.02 shake (sideways or in depth) fires within 0.3 s and moves aim < 3°.
+    Head look adds to the gun's angles (coarse slew); arrows / Space on the keyboard.
+  - Solo mode 'raid-gunner' (`createRaid(seed, 'gunner')`): you crew the lead bomber's top turret
+    (`g.crew`; its AI gunner `human` = stands down; `g.plane` = that bomber's plane; `g.player.alive`
+    false so nothing targets you). Turret drive CREW_SLEW 1.6 rad/s, elevation 2-85°, twin .50s 10 rds/s,
+    250-round belt then 5 s belt change, gun assist like the fighters' (× 1.5, 700 m). Rounds carry
+    `from` = your bomber and never hit it. Turret shot out / bomber down → 5 s → next bomber's top turret.
+    HUD: barrels, ring sight down the gun, belt, AZ/EL, shake meter, GRAB THE GUN prompt. Camera
+    (`crewCamera`) sits behind/above the guns; no flight calibration needed; claps ignored.
+    Sim: idle gunner loses 3/3 missions, a bot gunner aiming at the solution wins 2/3.
+  - Reload (`settings.reload`, start-screen box, default on): a WW2 gun group that runs dry rearms after
+    `RELOAD` { mg 8, cannon 12 } s (`reloadGuns`); HUD "RELOAD n s".
+  - Keys bar + bottom hint line + Tuning sliders → one collapsible "Keys & settings" menu (top right,
+    `<details>`, open state remembered, blurs after clicks so Space/arrows don't toggle it).
+  - Backlog (user): **the loading screen as a hangar** where whoever is waiting (duel/escort lobby, or
+    before a mission) can test their camera setup and adjust settings.
+  - Not yet tried by the user with a camera.

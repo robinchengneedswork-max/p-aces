@@ -628,8 +628,8 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   setOwnModel(w, p.type);
   w.plane.position.copy(tv(p.pos));
   setBasis(w.plane, p.fwd, p.up);
-  w.plane.visible = !p.crashed && w.view === 'chase';
-  const inCockpit = !p.crashed && w.view === 'cockpit';
+  w.plane.visible = !p.crashed && w.view === 'chase' && !g.crew;   // (crewing a turret: you're in the bomber)
+  const inCockpit = !p.crashed && w.view === 'cockpit' && !g.crew;
   if (inCockpit) {
     const C = w.cockpit;
     // Gauges: speed, throttle, altitude, as sweeping needles.
@@ -745,7 +745,8 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   });
 
   updateTrails(w, p, dt);
-  updateCamera(w, p, dt, look);
+  if (g.crew) crewCamera(w, g.crew);
+  else updateCamera(w, p, dt, look);
   // Hit: jolt the camera (position and a little roll), harder the bigger the hit.
   if (w.shake > 0.01 && !p.crashed) {
     const k = w.shake * w.shake, r = () => Math.random() * 2 - 1;
@@ -785,6 +786,17 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     w.renderer.clearDepth();
     w.renderer.render(C.scene, C.camera);
   }
+}
+
+// In a turret (gunner.js): the eye sits just behind and above the guns and looks down them.
+function crewCamera(w, c) {
+  const cam = w.camera, P = c.b.plane;
+  if (Math.abs(cam.fov - CONFIG.FOV_BASE) > 0.01) { cam.fov = CONFIG.FOV_BASE; cam.updateProjectionMatrix(); }
+  const eye = vAdd(c.at, vAdd(vScale(P.up, 0.9), vScale(c.dir, -1.2)));
+  cam.position.copy(tv(eye));
+  cam.up.copy(tv(P.up));
+  cam.lookAt(tv(vAdd(eye, vScale(c.dir, 200))));
+  w.camPos = null;
 }
 
 function updateCamera(w, p, dt, look) {

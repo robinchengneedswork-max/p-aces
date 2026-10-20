@@ -10,7 +10,7 @@
 
 function createRaid(seed, role) {
   const g = createGame(seed, 'escort', role === 'attacker' ? 'bf109' : 'p51');
-  g.team = role;
+  g.team = role === 'attacker' ? 'attacker' : 'escort';
   const a = g.rng() * Math.PI * 2;
   const heading = v3(Math.sin(a), 0, Math.cos(a));
   const center = v3(0, groundHeight(0, 0) + CONFIG.ESCORT_ALT, 0);
@@ -24,7 +24,8 @@ function createRaid(seed, role) {
     gap: 0,             // s until the next AI 109 (escort role) or AI escort comes back in
     slots: [],          // attacker role: the AI escorts' places beside the formation (null = empty)
   };
-  escortRespawn(g);
+  if (role === 'gunner') crewTurret(g, g.bombers[0]);   // the lead bomber's top turret (gunner.js)
+  else escortRespawn(g);
   if (role === 'attacker') {
     g.plane.pos = vAdd(g.plane.pos, vScale(vNorm(v3(g.plane.fwd.x, 0, g.plane.fwd.z)), -1000));   // 6 km out to start
     syncPlayer(g);
@@ -173,7 +174,7 @@ function raidRules(g, dt) {
     for (const e of g.events) {
       if (e.type === 'kill' && e.bomber) s.kills++;
       if (s.role === 'attacker' && (e.type === 'shot-down' || e.type === 'crash')) s.lives--;
-      if (s.role === 'escort' && e.type === 'kill' && e.bandit && e.team === 'attacker') s.lives--;
+      if (s.role !== 'attacker' && e.type === 'kill' && e.bandit && e.team === 'attacker') s.lives--;
     }
     s.left = Math.max(0, s.left - dt);
     const end = (winner, why) => {
@@ -188,7 +189,7 @@ function raidRules(g, dt) {
   if (g.plane.crashed && g.respawnT >= CONFIG.ESCORT_RESPAWN && g.bombers.length && (s.role === 'escort' || s.lives > 0) && !s.over) escortRespawn(g);
   // The AI side: a fresh 109 (while the pool lasts) or a lost escort, RAID_GAP after the last went down.
   if (s.over) return;
-  if (s.role === 'escort') {
+  if (s.role !== 'attacker') {
     const up = g.bandits.filter(b => b.team === 'attacker').length;
     if (up < Math.min(CONFIG.RAID_109_AT_ONCE, s.lives)) {
       s.gap += dt;

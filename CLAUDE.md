@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (206 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (215 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
@@ -21,6 +21,9 @@ and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clie
 - **Other hand**: height = throttle, pinch thumb+index = gun, close the fist = missile (needs lock).
 - `C` (or double clap): 3 s to hold your centre, then a 6 s **range sweep** — move both hands to your
   comfortable limits; each direction's reach becomes full deflection (Esc skips the sweep). Stored per scheme.
+- `N` spawns a **bomber** (range or dogfight, up to 3): a big four-engined target crossing ahead,
+  straight and level, never shoots back. Hits count anywhere on its shape; 6 rounds into an engine
+  set it burning (drains HP). Shot down it falls burning to the ground.
 - `B` toggles the test range (drones + rings) and **dogfight** (one bandit at a time that shoots back:
   rookie, rookie, regular, regular, then aces).
 - `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
@@ -301,3 +304,9 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   plane's spec. Respawn keeps the type; duel snapshots carry `ty` (missing = jet, so old clients
   still duel). `jet` = CONFIG unchanged. Plan: 2 = Spitfire Mk I vs Bf 109E (prop thrust, wing
   G limit, neg-G cut), 3 = zone damage, 4 = more planes.
+- **Round 20 (2026-10-20): bomber target** (user: "a big target that flies in a straight line";
+  later idea: crew its gunner). `spawnBomber` (N): track crosses `BOMBER_CROSS` 2.5 km ahead ~9 s
+  after it appears, 30-150° to your heading, 130 m/s. Hit shape = `BOMBER_PARTS` spheres in its
+  own frame (fuselage, wings to the 18 m tips, tail, 4 engines) — the first zone-based hit test,
+  groundwork for WW2 zone damage. 60 HP, missile 20, engine 6 → burns at 1.2 HP/s. Killed: noses
+  over, rolls, falls, `bomber-crash` on the ground. Model has three gunner bubbles (looks only).

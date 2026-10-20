@@ -5,7 +5,8 @@
 // the duel server starts each round. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
 //
 // Bullets and missiles carry an owner ('player' or a bandit id) and hit only the other side.
-// Things a missile can chase are { pos, vel, alive }: drones, bandits, and g.player (you).
+// Things a missile can chase are { pos, vel, alive }: drones, bandits, bombers, and g.player (you).
+// Bombers (N, range and dogfight) are big straight-flying targets that never shoot.
 
 function createGame(seed, mode) {
   const rng = makeRng(seed || 12345);
@@ -21,6 +22,7 @@ function createGame(seed, mode) {
     missiles: [],
     drones: [],
     bandits: [],
+    bombers: [],
     remote: null,                           // duel: the other laptop's plane (duel.js)
     ring: null,
     gunAcc: 0,
@@ -92,6 +94,92 @@ function spawnBandit(g, skill) {
   return b;
 }
 
+// A bomber crossing your nose: its track passes BOMBER_CROSS ahead of you about BOMBER_LEAD_TIME
+// after it appears, at 30-150° to your heading, either side. Straight and level from then on.
+function spawnBomber(g) {
+  const p = g.plane;
+  const h = vNorm(v3(p.fwd.x, 0, p.fwd.z));
+  const heading = h.x || h.z ? h : v3(0, 0, -1);
+  const cross = vAdd(p.pos, vScale(heading, CONFIG.BOMBER_CROSS));
+  const ang = (30 + g.rng() * 120) * DEG * (g.rng() < 0.5 ? 1 : -1);
+  const dir = vRotate(heading, WORLD_UP, ang);
+  const pos = vSub(cross, vScale(dir, CONFIG.BOMBER_SPEED * CONFIG.BOMBER_LEAD_TIME));
+  pos.y = clamp(p.pos.y + (g.rng() - 0.5) * 300, groundHeight(pos.x, pos.z) + 500, CONFIG.CEILING - 300);
+  const plane = createPlane(pos, dir);
+  plane.speed = CONFIG.BOMBER_SPEED;
+  const b = {
+    id: g.nextId++, kind: 'bomber', plane, pos: plane.pos, vel: vScale(plane.fwd, plane.speed),
+    hp: CONFIG.BOMBER_HP, maxHp: CONFIG.BOMBER_HP,
+    engines: [0, 1, 2, 3].map(() => CONFIG.BOMBER_ENGINE_HP), burning: [false, false, false, false],
+    alive: true, spin: (g.rng() < 0.5 ? -1 : 1) * (0.15 + g.rng() * 0.2),
+  };
+  g.bombers.push(b);
+  g.events.push({ type: 'bomber', pos });
+  return b;
+}
+
+// World position of one of a bomber's parts.
+function bomberPartPos(b, part) {
+  const P = b.plane;
+  return vAdd(b.pos, vAdd(vScale(P.right, part.x), vAdd(vScale(P.up, part.y), vScale(P.fwd, -part.z))));
+}
+
+// The part of bomber b that segment a→c passes within (its radius + extra), closest first, or null.
+function bomberHit(b, a, c, extra) {
+  if (segPointDist(a, c, b.pos) > 22 + extra) return null;
+  let best = null, bd = Infinity;
+  for (const part of CONFIG.BOMBER_PARTS) {
+    const d = segPointDist(a, c, bomberPartPos(b, part));
+    if (d < part.r + extra && d < bd) { bd = d; best = part; }
+  }
+  return best;
+}
+
+function hitBomber(g, b, dmg, part, pos, how) {
+  if (!b.alive) return;
+  b.hp -= dmg;
+  g.events.push({ type: 'hit', pos });
+  if (part && part.zone === 'engine') {
+    const i = part.engine;
+    b.engines[i] -= dmg;
+    if (b.engines[i] <= 0 && !b.burning[i]) { b.burning[i] = true; g.events.push({ type: 'engine-fire', pos }); }
+  }
+  if (b.hp <= 0) killBomber(g, b, how);
+}
+
+function killBomber(g, b, how) {
+  b.alive = false;
+  g.kills++;
+  g.score += CONFIG.BOMBER_REWARD;
+  g.events.push({ type: 'kill', pos: b.pos, bomber: true, how });
+}
+
+// Alive: straight and level, burning engines eat its HP. Shot down: it noses over, rolls and
+// falls burning until it hits the ground.
+function updateBombers(g, dt) {
+  for (const b of g.bombers) {
+    const P = b.plane;
+    if (b.alive) {
+      const fires = b.burning.filter(Boolean).length;
+      if (fires) { b.hp -= fires * CONFIG.BOMBER_BURN * dt; if (b.hp <= 0) killBomber(g, b, 'fire'); }
+      if (vDist(b.pos, g.plane.pos) > CONFIG.BOMBER_MAX_DIST) b.gone = true;
+    } else {
+      if (P.fwd.y > -0.75) rotatePlane(P, P.right, -0.3 * dt);
+      rotatePlane(P, P.fwd, b.spin * dt);
+      P.fwd = vNorm(P.fwd);
+      P.right = vNorm(vCross(P.fwd, P.up));
+      P.up = vCross(P.right, P.fwd);
+      P.speed = Math.min(P.speed + 12 * dt, 230);
+      if (P.pos.y < groundHeight(P.pos.x, P.pos.z)) { b.gone = true; g.events.push({ type: 'bomber-crash', pos: P.pos }); }
+    }
+    P.path = { ...P.fwd };
+    P.pos = vAdd(P.pos, vScale(P.fwd, P.speed * dt));
+    b.pos = P.pos;
+    b.vel = vScale(P.fwd, P.speed);
+  }
+  g.bombers = g.bombers.filter(b => !b.gone);
+}
+
 function placeRing(g) {
   const p = g.plane;
   const from = g.ring ? g.ring.pos : p.pos;
@@ -103,7 +191,7 @@ function placeRing(g) {
 }
 
 function lockables(g) {
-  return g.drones.concat(g.bandits, g.remote ? [g.remote] : []).filter(t => t.alive);
+  return g.drones.concat(g.bandits, g.bombers, g.remote ? [g.remote] : []).filter(t => t.alive);
 }
 
 function updateLock(g, dt) {
@@ -246,6 +334,7 @@ function gameUpdate(g, ctrl, dt) {
   if (p.crashed) { g.gunSol = null; g.gunAssisted = false; }
 
   if (g.mode === 'dogfight') updateBandits(g, dt);
+  updateBombers(g, dt);
   updateBullets(g, dt);
   updateMissiles(g, dt);
 
@@ -341,6 +430,10 @@ function updateBullets(g, dt) {
       for (const t of g.bandits) {
         if (t.alive && segPointDist(prev, b.pos, t.pos) < CONFIG.BANDIT_R) { hitBandit(g, t, 1, 'gun'); b.age = 99; break; }
       }
+      for (const t of g.bombers) {
+        const part = b.age < 99 && t.alive && bomberHit(t, prev, b.pos, 0);
+        if (part) { hitBomber(g, t, 1, part, b.pos, 'gun'); b.age = 99; break; }
+      }
       const R = g.remote;
       if (b.age < 99 && R && R.alive && segPointDist(prev, b.pos, R.pos) < CONFIG.DUEL_HIT_R) {
         g.events.push({ type: 'duel-hit', dmg: CONFIG.BANDIT_GUN_DMG, pos: b.pos });
@@ -392,8 +485,17 @@ function updateMissiles(g, dt) {
         g.events.push({ type: 'duel-hit', dmg: CONFIG.ENEMY_MISSILE_DMG, pos: m.pos }, { type: 'boom', pos: m.pos });
         m.age = 99;
       }
+      for (const t of g.bombers) {
+        const part = m.age < 99 && t.alive && bomberHit(t, prev, m.pos, CONFIG.MISSILE_FUSE);
+        if (part) {
+          hitBomber(g, t, CONFIG.BOMBER_MISSILE_DMG, part, m.pos, 'missile');
+          g.events.push({ type: 'boom', pos: m.pos });
+          m.age = 99;
+          break;
+        }
+      }
       for (const t of g.bandits) {
-        if (t.alive && segPointDist(prev, m.pos, t.pos) < CONFIG.MISSILE_FUSE) {
+        if (m.age < 99 && t.alive && segPointDist(prev, m.pos, t.pos) < CONFIG.MISSILE_FUSE) {
           hitBandit(g, t, CONFIG.MISSILE_DMG, 'missile');
           g.events.push({ type: 'boom', pos: m.pos });
           m.age = 99;

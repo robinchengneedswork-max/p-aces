@@ -298,6 +298,39 @@ function makeCockpit() {
   return { scene, camera, sun, needles, stick, throttle, ext };
 }
 
+// A four-engined bomber (wingspan 36 m), nose down -z. Props spin (userData.props); the gun
+// turrets are only looks for now (crewing one is a later idea). Part positions match BOMBER_PARTS.
+function makeBomberModel() {
+  const g = new THREE.Group();
+  const body = new THREE.MeshPhongMaterial({ color: 0x66704f, flatShading: true });
+  const dark = new THREE.MeshPhongMaterial({ color: 0x3b4230, flatShading: true });
+  const glassM = new THREE.MeshPhongMaterial({ color: 0x223344, shininess: 90 });
+  const add = (geo, mat, x, y, z, ink) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); g.add(m); if (ink) addInk(m, 0.3); return m; };
+  const fus = new THREE.CylinderGeometry(1.9, 1.3, 26, 10);
+  fus.rotateX(Math.PI / 2);
+  add(fus, body, 0, 0, 0, true);
+  const nose = new THREE.SphereGeometry(1.9, 10, 8);
+  nose.scale(1, 1, 1.6);
+  add(nose, glassM, 0, 0, -13, false);
+  add(new THREE.BoxGeometry(36, 0.5, 4.6), body, 0, 0, 0, true);
+  add(new THREE.BoxGeometry(12, 0.3, 3), body, 0, 0.6, 12, true);
+  add(new THREE.BoxGeometry(0.4, 5, 4.2), dark, 0, 3, 11.5, true);
+  g.userData.props = [];
+  for (const x of [-11, -5.5, 5.5, 11]) {
+    const nac = new THREE.CylinderGeometry(1, 0.8, 5, 8);
+    nac.rotateX(Math.PI / 2);
+    add(nac, dark, x, -0.3, -2.5, true);
+    const prop = add(new THREE.CircleGeometry(1.9, 16), new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false }), x, -0.3, -5.1, false);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.25, 0.1), dark);
+    prop.add(blade);
+    g.userData.props.push(prop);
+  }
+  add(new THREE.SphereGeometry(0.9, 8, 6), glassM, 0, 1.8, -6, false);   // top turret
+  add(new THREE.SphereGeometry(0.8, 8, 6), glassM, 0, -1.8, -1, false);  // ball turret
+  add(new THREE.SphereGeometry(0.7, 8, 6), glassM, 0, 0.2, 13.4, false); // tail gunner
+  return g;
+}
+
 const BANDIT_PAINT = { body: 0x8a5a58, dark: 0x3a2426 };
 const DUEL_PAINT = { body: 0x5a6f9a, dark: 0x23304a };
 
@@ -503,6 +536,15 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     setBasis(m, b.plane.fwd, b.plane.up);
     m.userData.flame.scale.set(1, 1, 0.4 + b.plane.throttle * 1.2 + Math.random() * 0.15);
   }
+  // Bombers keep their model while they fall burning.
+  for (const b of g.bombers || []) {
+    flying.add(b.id);
+    let m = w.bandits.get(b.id);
+    if (!m) { m = makeBomberModel(); styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m); }
+    m.position.copy(tv(b.plane.pos));
+    setBasis(m, b.plane.fwd, b.plane.up);
+    b.burning.forEach((burn, i) => { m.userData.props[i].rotation.z += (burn ? 0.15 : 1.1); });
+  }
   for (const [id, m] of w.bandits) if (!flying.has(id)) { w.scene.remove(m); w.bandits.delete(id); }
 
   w.ring.visible = !!g.ring;
@@ -541,7 +583,9 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   updateSmoke(w.damageSmoke, dt);
 
   for (const e of g.events) {
-    if (e.type === 'kill') addBoom(w, e.pos, e.bandit ? 60 : 40);
+    if (e.type === 'kill') addBoom(w, e.pos, e.bomber ? 80 : e.bandit ? 60 : 40);
+    if (e.type === 'engine-fire') addBoom(w, e.pos, 14);
+    if (e.type === 'bomber-crash') addBoom(w, e.pos, 120);
     if (e.type === 'hit' || e.type === 'duel-hit') addBoom(w, e.pos, 6);
     if (e.type === 'shot-down') addBoom(w, e.pos, 70);
     if (e.type === 'boom') addBoom(w, e.pos, 25);
@@ -583,6 +627,14 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   smokeFrom(p, g.hp / CONFIG.PLAYER_HP);
   if (g.remote && g.remote.alive) smokeFrom(g.remote.plane, g.remote.hp / CONFIG.PLAYER_HP);
   for (const b of g.bandits || []) smokeFrom(b.plane, b.hp / b.maxHp);
+  // Bombers smoke from each burning engine (all four once it's going down).
+  for (const b of g.bombers || []) {
+    CONFIG.BOMBER_PARTS.forEach(part => {
+      if (part.zone !== 'engine' || (b.alive && !b.burning[part.engine]) || Math.random() < 0.3) return;
+      const at = vAdd(bomberPartPos(b, part), vScale(b.plane.fwd, -3 - Math.random() * 3));
+      w.damageSmoke.puffs.push({ x: at.x + (Math.random() - 0.5) * 2, y: at.y + (Math.random() - 0.5) * 2, z: at.z + (Math.random() - 0.5) * 2, age: 0 });
+    });
+  }
   w.renderer.clear();
   w.renderer.render(w.scene, w.camera);
   if (inCockpit) {

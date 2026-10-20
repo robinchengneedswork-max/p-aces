@@ -103,6 +103,31 @@ const CONFIG = {
   MISSILE_FUSE: 14,          // proximity fuse (m)
   MISSILE_GIMBAL: 75 * DEG,  // target further off the seeker's nose than this = it loses you
   BANDIT_SPAWN_DIST: 3500,
+
+  // Bomber (N): a big four-engined target for gunnery practice that flies straight and level and
+  // never shoots back. Hit anywhere on its shape (BOMBER_PARTS); an engine that takes
+  // BOMBER_ENGINE_HP burns and keeps costing it HP.
+  BOMBER_SPEED: 130,
+  BOMBER_HP: 60,             // gun rounds to bring it down (a missile is BOMBER_MISSILE_DMG)
+  BOMBER_MISSILE_DMG: 20,
+  BOMBER_ENGINE_HP: 6,
+  BOMBER_BURN: 1.2,          // HP/s per burning engine
+  BOMBER_CROSS: 2500,        // spawns so its track crosses this far ahead of you…
+  BOMBER_LEAD_TIME: 9,       // …about this many seconds after it appears
+  BOMBER_MAX: 3,             // at once
+  BOMBER_MAX_DIST: 15000,    // flown off: gone
+  BOMBER_REWARD: 500,
+  // Its shape in its own frame (x right, y up, z back, m): fuselage, wings, engines, tail.
+  BOMBER_PARTS: [
+    { zone: 'fuselage', x: 0, y: 0, z: -10, r: 3 }, { zone: 'fuselage', x: 0, y: 0, z: -4, r: 3.2 },
+    { zone: 'fuselage', x: 0, y: 0, z: 2, r: 3.2 }, { zone: 'fuselage', x: 0, y: 0, z: 8, r: 2.6 },
+    { zone: 'tail', x: 0, y: 2.5, z: 12, r: 3 }, { zone: 'tail', x: -4.5, y: 0.5, z: 12, r: 2 }, { zone: 'tail', x: 4.5, y: 0.5, z: 12, r: 2 },
+    { zone: 'wing', x: -8, y: 0, z: 0, r: 2.6 }, { zone: 'wing', x: 8, y: 0, z: 0, r: 2.6 },
+    { zone: 'wing', x: -14, y: 0, z: 0.5, r: 2.2 }, { zone: 'wing', x: 14, y: 0, z: 0.5, r: 2.2 },
+    { zone: 'wing', x: -17.5, y: 0, z: 1, r: 1.6 }, { zone: 'wing', x: 17.5, y: 0, z: 1, r: 1.6 },
+    { zone: 'engine', engine: 0, x: -11, y: -0.3, z: -2.5, r: 2.1 }, { zone: 'engine', engine: 1, x: -5.5, y: -0.3, z: -3, r: 2.1 },
+    { zone: 'engine', engine: 2, x: 5.5, y: -0.3, z: -3, r: 2.1 }, { zone: 'engine', engine: 3, x: 11, y: -0.3, z: -2.5, r: 2.1 },
+  ],
   WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
   // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal

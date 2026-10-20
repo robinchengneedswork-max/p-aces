@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -849,6 +849,63 @@ console.log('plane specs');
   check('respawning keeps your plane type', !g.plane.crashed && g.plane.type === 'testSlow');
   check('the duel snapshot says which plane', X.duelSnapshot(g).ty === 'testSlow');
   delete X.PLANES.testSlow;
+}
+
+console.log('bomber');
+{
+  const idle = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false };
+  const g = X.createGame(21);
+  const b = X.spawnBomber(g);
+  const fwd0 = { ...b.plane.fwd }, y0 = b.pos.y;
+  // Its track crosses ~BOMBER_CROSS ahead of where you were.
+  const p0 = { ...g.plane.pos }, h = { ...g.plane.fwd };
+  let closest = Infinity;
+  for (let i = 0; i < 60 * 20; i++) {
+    X.gameUpdate(g, idle, 1 / 60);
+    const ahead = X.vDot(X.vSub(b.pos, p0), h);
+    const side = X.vLen(X.vSub(X.vSub(b.pos, p0), X.vScale(h, ahead)));
+    closest = Math.min(closest, Math.abs(ahead - CONFIG.BOMBER_CROSS) + Math.abs(side - Math.abs(b.pos.y - p0.y)));
+  }
+  check('the bomber flies dead straight and level', X.vDot(fwd0, b.plane.fwd) > 0.9999 && Math.abs(b.pos.y - y0) < 0.5 && b.alive);
+  check('…and it is lockable and gets a gun solution', (() => { const g2 = X.createGame(22); const b2 = X.spawnBomber(g2); return g2.bombers.length === 1 && b2.alive && b2.vel && X.vLen(b2.vel) > 100; })());
+
+  // Shooting it: a round at each part point hits; a round 6 m past the wingtip misses.
+  const shoot = (bb, gg, at) => {
+    const from = X.vAdd(at, X.v3(0, 300, 0));
+    gg.bullets.push({ pos: from, vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'player' });
+    const hp = bb.hp;
+    X.gameUpdate(gg, idle, 1 / 60);
+    return bb.hp < hp;
+  };
+  const g3 = X.createGame(23);
+  g3.plane.pos = X.v3(0, 9000, 0);
+  const b3 = X.spawnBomber(g3);
+  b3.plane.pos = b3.pos = X.v3(0, 8000, -3000);
+  const at = part => X.vAdd(X.bomberPartPos(b3, part), X.vScale(b3.vel, 1 / 60));
+  const tip = CONFIG.BOMBER_PARTS.find(p => p.zone === 'wing' && p.x > 17);
+  check('a round on the wingtip hits', shoot(b3, g3, at(tip)));
+  const past = { ...tip, x: tip.x + 6 };
+  check('a round 6 m past the wingtip misses', !shoot(b3, g3, at(past)));
+  const eng = CONFIG.BOMBER_PARTS.find(p => p.zone === 'engine');
+  for (let i = 0; i < CONFIG.BOMBER_ENGINE_HP; i++) shoot(b3, g3, at(eng));
+  check('enough rounds into one engine set it on fire', b3.burning[eng.engine] && b3.burning.filter(Boolean).length === 1);
+  const hp = b3.hp;
+  for (let i = 0; i < 60; i++) X.gameUpdate(g3, idle, 1 / 60);
+  check('a burning engine keeps costing it HP', Math.abs(hp - b3.hp - CONFIG.BOMBER_BURN) < 0.1, (hp - b3.hp).toFixed(2));
+
+  // A missile from behind brings BOMBER_MISSILE_DMG; then guns finish it; it falls and crashes.
+  const g4 = X.createGame(24);
+  const b4 = X.spawnBomber(g4);
+  const behind = X.vSub(b4.pos, X.vScale(b4.plane.fwd, 400));
+  g4.missiles.push({ id: 900, pos: behind, dir: b4.plane.fwd, speed: 400, target: b4, age: 0, owner: 'player', turn: CONFIG.MISSILE_TURN });
+  for (let i = 0; i < 180 && b4.hp === CONFIG.BOMBER_HP; i++) X.gameUpdate(g4, idle, 1 / 60);
+  check('a missile hits it for BOMBER_MISSILE_DMG', CONFIG.BOMBER_HP - b4.hp === CONFIG.BOMBER_MISSILE_DMG);
+  b4.hp = 0.5;
+  shoot(b4, g4, X.vAdd(b4.pos, X.vScale(b4.vel, 1 / 60)));
+  check('shot down: not a target any more, but still there, falling', !b4.alive && g4.bombers.includes(b4) && g4.kills === 1 && g4.score >= CONFIG.BOMBER_REWARD);
+  let crashed = false;
+  for (let i = 0; i < 60 * 120 && !crashed; i++) { X.gameUpdate(g4, idle, 1 / 60); crashed = g4.events.some(e => e.type === 'bomber-crash'); }
+  check('…it noses over and hits the ground, then is gone', crashed && !g4.bombers.includes(b4));
 }
 
 console.log('gun lead + assist');

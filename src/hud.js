@@ -324,7 +324,7 @@ function drawLead(ctx, W, H, st) {
 // Bandits: a red diamond, name + health, and an edge arrow when off screen.
 function drawBandits(ctx, W, H, st) {
   const g = st.game, w = st.world;
-  for (const b of g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [])) {
+  for (const b of g.bandits.concat(g.remote && g.remote.alive ? [g.remote] : [], g.bombers.filter(t => t.alive))) {
     const s = projectToScreen(w, b.pos, W, H);
     const dist = vDist(b.pos, g.plane.pos);
     if (!s.on) { edgeArrow(ctx, W, H, s, HUD.red); continue; }
@@ -342,7 +342,7 @@ function drawBandits(ctx, W, H, st) {
     ctx.fillStyle = HUD.red;
     ctx.font = '11px ' + HUD.font;
     ctx.textAlign = 'left';
-    const label = b.kind === 'remote' ? b.name.toUpperCase() : SKILLS[b.skill].name;
+    const label = b.kind === 'remote' ? b.name.toUpperCase() : b.kind === 'bomber' ? 'BOMBER' : SKILLS[b.skill].name;
     ctx.fillText((locked ? 'LOCK ' : '') + label + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
     ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / (b.maxHp || CONFIG.PLAYER_HP)), 3);
   }

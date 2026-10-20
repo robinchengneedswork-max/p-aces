@@ -464,7 +464,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     const C = w.cockpit;
     // Gauges: speed, throttle, altitude, as sweeping needles.
     const sweep = k => Math.PI * 0.75 - clamp(k, 0, 1) * Math.PI * 1.5;
-    C.needles[0].rotation.z = sweep((p.speed - CONFIG.SPEED_MIN * 0.7) / (CONFIG.SPEED_MAX * 1.25 - CONFIG.SPEED_MIN * 0.7));
+    C.needles[0].rotation.z = sweep((p.speed - p.spec.SPEED_MIN * 0.7) / (p.spec.SPEED_MAX * 1.25 - p.spec.SPEED_MIN * 0.7));
     C.needles[1].rotation.z = sweep(p.throttle);
     C.needles[2].rotation.z = sweep(p.pos.y / CONFIG.CEILING);
     if (ctrl) {
@@ -600,7 +600,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
 function updateCamera(w, p, dt, look) {
   const cam = w.camera;
   // Field of view widens with speed, the usual game trick for a sense of speed.
-  const k = clamp((p.speed - CONFIG.SPEED_MIN) / (CONFIG.SPEED_MAX - CONFIG.SPEED_MIN), 0, 1.25);
+  const k = clamp((p.speed - p.spec.SPEED_MIN) / (p.spec.SPEED_MAX - p.spec.SPEED_MIN), 0, 1.25);
   const fov = CONFIG.FOV_BASE + CONFIG.FOV_SPEED * k;
   if (Math.abs(cam.fov - fov) > 0.01) {
     cam.fov += (fov - cam.fov) * (1 - Math.exp(-dt * 3));

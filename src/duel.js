@@ -40,7 +40,7 @@ const unvec = a => v3(a[0], a[1], a[2]);
 function duelSnapshot(g, firing) {
   const p = g.plane;
   return {
-    t: 's', p: vec(p.pos, r1), f: vec(p.fwd, r3), u: vec(p.up, r3), v: r1(p.speed), th: r3(p.throttle),
+    t: 's', p: vec(p.pos, r1), f: vec(p.fwd, r3), u: vec(p.up, r3), v: r1(p.speed), th: r3(p.throttle), ty: p.type,
     hp: g.hp, dead: !!p.crashed, gun: !!firing && !p.crashed,
     m: g.missiles.filter(m => m.owner === 'player').map(m => [m.id, ...vec(m.pos, r1), ...vec(m.dir, r3), r1(m.speed), m.target ? 1 : 0]),
   };
@@ -50,8 +50,8 @@ function duelSnapshot(g, firing) {
 function duelSpawn(g, sp) {
   const pos = v3(sp.x, 0, sp.z);
   pos.y = groundHeight(pos.x, pos.z) + sp.alt;
-  g.plane = createPlane(pos, v3(sp.hx, 0, sp.hz));
-  g.plane.speed = CONFIG.CORNER_SPEED + 30;
+  g.plane = createPlane(pos, v3(sp.hx, 0, sp.hz), g.plane.type);
+  g.plane.speed = g.plane.spec.CORNER_SPEED + 30;
   g.hp = CONFIG.PLAYER_HP;
   g.bullets = [];
   g.missiles = [];
@@ -132,7 +132,9 @@ function duelRemoteStep(d, g, now, dt) {
   const last = S[S.length - 1];
   const right = vNorm(vCross(fwd, up));
   up = vCross(right, fwd);
-  const R = g.remote || (g.remote = { id: 'remote', kind: 'remote', plane: createPlane(pos) });
+  const R = g.remote || (g.remote = { id: 'remote', kind: 'remote', plane: createPlane(pos, null, last.ty) });
+  // The other pilot picked a different plane this round: swap the model's flight spec.
+  if (R.plane.type !== planeSpec(last.ty).type) R.plane = createPlane(pos, null, last.ty);
   const op = duelOpponent(d);
   R.name = op ? op.name : 'OPPONENT';
   R.hp = last.hp;

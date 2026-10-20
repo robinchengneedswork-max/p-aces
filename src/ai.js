@@ -23,7 +23,7 @@ const DODGE_IDEAL = 1200;  // m: start the break mid CONFIG.BREAK_DIST
 
 function createBandit(id, skill, pos, fwd, rng) {
   const plane = createPlane(pos, fwd);
-  plane.speed = CONFIG.CORNER_SPEED + 20;
+  plane.speed = plane.spec.CORNER_SPEED + 20;
   const sk = SKILLS[skill];
   return {
     id, kind: 'bandit', skill, plane, alive: true,
@@ -76,7 +76,7 @@ function pilotStep(b, target, threats, dt) {
   const p = b.plane, P = b.pilot, sk = SKILLS[b.skill];
   const rng = b.rng;
   // Energy: a hard turn bleeds speed (flight.js), so a good pilot eases off below corner speed.
-  const pullMax = p.speed < CONFIG.CORNER_SPEED - sk.energy ? Math.min(sk.pull, 0.7) : sk.pull;
+  const pullMax = p.speed < p.spec.CORNER_SPEED - sk.energy ? Math.min(sk.pull, 0.7) : sk.pull;
   // Reaction: refresh our picture of the target every `react` s, extrapolate it in between.
   P.think -= dt;
   if (target && (P.think <= 0 || !P.seen)) {
@@ -117,7 +117,7 @@ function pilotStep(b, target, threats, dt) {
     const s = steerTo(p, vAdd(p.pos, vScale(perp, 1000)), pullMax);
     ctrl = { roll: s.roll, pitch: pullMax, yaw: 0 };
     // Fast = g-limited = turns wide: chop the throttle to get down toward corner speed.
-    throttle = p.speed > CONFIG.CORNER_SPEED + 20 ? 0 : 1;
+    throttle = p.speed > p.spec.CORNER_SPEED + 20 ? 0 : 1;
   } else if (groundDanger(p, false)) {
     P.mode = 'recover';
     ctrl = recoverCtrl(p);
@@ -135,7 +135,7 @@ function pilotStep(b, target, threats, dt) {
     if (P.mode !== 'extend') P.extendT = 3;
     P.mode = 'extend';
     P.extendT -= dt;
-    if (p.speed > CONFIG.CORNER_SPEED) P.extendT = 0;
+    if (p.speed > p.spec.CORNER_SPEED) P.extendT = 0;
     const ahead = vAdd(p.pos, vScale(vNorm(v3(p.fwd.x, -0.15, p.fwd.z)), 1000));
     ctrl = steerTo(p, ahead, 0.4);
     throttle = 1;

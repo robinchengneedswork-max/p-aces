@@ -1,6 +1,7 @@
 // flight.js — arcade flight model with a little energy. A plane is a position, an orthonormal
 // basis (fwd, up, right) for where the nose points, and a flight path (path, unit) that trails the
 // nose a little: pull hard and the plane slips, travelling slightly outside where it points.
+// Every number comes from the plane's own spec (planes.js: CONFIG + that type's overrides).
 // Pure: no DOM, no THREE.
 //
 // ctrl = { roll, pitch, yaw } in -1..1 (roll + = bank right, pitch + = nose up), throttle 0..1.
@@ -12,11 +13,13 @@
 
 const WORLD_UP = v3(0, 1, 0);
 
-function createPlane(pos, fwd) {
+function createPlane(pos, fwd, type) {
+  const spec = planeSpec(type);
   const p = {
+    type: spec.type, spec,
     pos: pos || v3(0, CONFIG.START_ALT, 0),
     fwd: v3(0, 0, -1), up: v3(0, 1, 0), right: v3(1, 0, 0), path: v3(0, 0, -1),
-    speed: (CONFIG.SPEED_MIN + CONFIG.SPEED_MAX) / 2,
+    speed: (spec.SPEED_MIN + spec.SPEED_MAX) / 2,
     throttle: 0.5,
     g: 1, slip: 0, stall: 0,
     strain: 0, red: 0,
@@ -53,9 +56,9 @@ function rotatePlane(p, axis, a) {
 }
 
 // Share of PITCH_RATE available at this speed: 1 at corner speed, less either side.
-function pitchEnvelope(speed) {
-  const v = Math.max(1, speed), c = CONFIG.CORNER_SPEED;
-  return v < c ? Math.pow(v / c, CONFIG.PITCH_LOW_EXP) : c / v;
+function pitchEnvelope(speed, spec = CONFIG) {
+  const v = Math.max(1, speed), c = spec.CORNER_SPEED;
+  return v < c ? Math.pow(v / c, spec.PITCH_LOW_EXP) : c / v;
 }
 
 // How hard the nose is being hauled round (pitch or turn, not roll: fwd doesn't move in a pure
@@ -68,8 +71,8 @@ function vaporAmount(prevFwd, fwd, dt) {
 
 function flightStep(p, ctrl, dt, assist) {
   if (p.crashed) return p;
-  const C = CONFIG;
-  const env = pitchEnvelope(p.speed);
+  const C = p.spec || CONFIG;
+  const env = pitchEnvelope(p.speed, C);
   p.stall = clamp((C.STALL_SPEED - p.speed) / 20, 0, 1);
   const pull = ctrl.pitch * (1 - 0.7 * p.stall);
   const pitchRate = (pull > 0 ? pull : pull * C.PUSH_SHARE) * C.PITCH_RATE * env;

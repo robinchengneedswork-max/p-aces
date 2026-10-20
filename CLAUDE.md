@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (201 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (206 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
@@ -292,3 +292,12 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   sight within `gunAssist` 3.5° (slider, 0 = off) of the marker and ≤1100 m → rounds fire along the
   solution. Bandits get no assist. Tests: sight on the marker hits a 70 m/s crosser at 600 m, sight
   on the target misses, 3.2° off hits only with the assist.
+- **Round 19 (2026-10-20), branch `plane-specs`: per-plane flight models, step 1 (refactor only).**
+  User wants WW2 planes (real wing G limits, energy, prop quirks like carburettor cut-out on
+  negative G vs fuel injection) and War Thunder-style component damage instead of HP, in this game.
+  `planes.js`: `PLANES[type]` lists only what differs from CONFIG; `planeSpec(type)` = CONFIG with
+  those laid over it (prototype fallback, cached). Planes carry `type` + `spec`; `flightStep`,
+  `pitchEnvelope(speed, spec)`, AI energy, HUD speed hint, FOV, gauges and engine pitch read the
+  plane's spec. Respawn keeps the type; duel snapshots carry `ty` (missing = jet, so old clients
+  still duel). `jet` = CONFIG unchanged. Plan: 2 = Spitfire Mk I vs Bf 109E (prop thrust, wing
+  G limit, neg-G cut), 3 = zone damage, 4 = more planes.

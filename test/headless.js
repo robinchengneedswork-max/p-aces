@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, PLANES, planeSpec, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -823,6 +823,32 @@ console.log('duel (two laptops, in one process)');
   X.gameUpdate(C.g, ctrl0, 1 / 60);
   check("the other laptop's missile raises MISSILE with its distance", C.g.warn.missile && Math.abs(C.g.warn.missile.dist - 1200) < 120, C.g.warn.missile && Math.round(C.g.warn.missile.dist) + ' m');
   check("…and it never hits you here (their laptop decides)", C.g.hp === 100);
+}
+
+console.log('plane specs');
+{
+  const jet = X.planeSpec('jet');
+  check('the jet spec is CONFIG unchanged', ['PITCH_RATE', 'CORNER_SPEED', 'SPEED_MAX', 'TURN_BLEED', 'SLIP_GRIP', 'STALL_SPEED'].every(k => jet[k] === CONFIG[k]));
+  check('planes are jets by default, unknown types too', X.createPlane().type === 'jet' && X.createPlane(null, null, 'nope').type === 'jet');
+  // A made-up type with half the pull rate: only that plane turns slower.
+  X.PLANES.testSlow = { name: 'TEST', PITCH_RATE: CONFIG.PITCH_RATE / 2 };
+  const turn = type => {
+    const q = X.createPlane(X.v3(0, 3000, 0), null, type);
+    q.speed = CONFIG.CORNER_SPEED;
+    const f0 = { ...q.fwd };
+    for (let i = 0; i < 30; i++) X.flightStep(q, { roll: 0, pitch: 1, yaw: 0, throttle: 0.7 }, 1 / 60, false);
+    return Math.acos(Math.max(-1, Math.min(1, X.vDot(f0, q.fwd))));
+  };
+  const a = turn('jet'), b = turn('testSlow');
+  check('a type\'s own numbers change only that plane', Math.abs(b / a - 0.5) < 0.05 && X.planeSpec('jet').PITCH_RATE === CONFIG.PITCH_RATE, (b / a).toFixed(2));
+  // Respawn keeps the type; the duel snapshot carries it and the other laptop flies the same spec.
+  const g = X.createGame(3);
+  g.plane = X.createPlane(g.plane.pos, g.plane.fwd, 'testSlow');
+  g.plane.crashed = true;
+  for (let i = 0; i < 400 && g.plane.crashed; i++) X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false }, 1 / 60);
+  check('respawning keeps your plane type', !g.plane.crashed && g.plane.type === 'testSlow');
+  check('the duel snapshot says which plane', X.duelSnapshot(g).ty === 'testSlow');
+  delete X.PLANES.testSlow;
 }
 
 console.log('gun lead + assist');

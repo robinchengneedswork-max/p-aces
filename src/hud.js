@@ -150,7 +150,7 @@ function drawRecorder(ctx, W, H, st) {
 // and hard pulls. Redrawn at random every picture, so they shimmer like hand-drawn ones.
 function drawSpeedLines(ctx, W, H, st) {
   const p = st.game.plane;
-  const fast = clamp((p.speed - CONFIG.SPEED_MAX * 0.7) / (CONFIG.SPEED_MAX * 0.55), 0, 1);
+  const fast = clamp((p.speed - p.spec.SPEED_MAX * 0.7) / (p.spec.SPEED_MAX * 0.55), 0, 1);
   const k = Math.max(fast, (st.world.vapor || 0) * 0.8);
   if (k <= 0.02) return;
   const cx = W / 2, cy = H / 2, R = Math.hypot(W, H) / 2;
@@ -497,7 +497,7 @@ function drawGauges(ctx, W, H, st) {
   ctx.fillStyle = p.g > CONFIG.G_ONSET || p.g < CONFIG.REDOUT_G ? HUD.amber : HUD.green;
   ctx.fillText(p.g.toFixed(1) + ' G', W * 0.2, cy + 32);
   // Energy hint: at best turning speed you out-turn anyone; slow, you can't.
-  const dv = p.speed - CONFIG.CORNER_SPEED;
+  const dv = p.speed - p.spec.CORNER_SPEED;
   ctx.font = '11px ' + HUD.font;
   ctx.fillStyle = Math.abs(dv) < 25 ? HUD.cyan : dv < -50 ? HUD.amber : HUD.dim;
   ctx.fillText(Math.abs(dv) < 25 ? 'BEST TURN' : dv < 0 ? 'SLOW — unload / dive' : 'FAST — pull to bleed', W * 0.2, cy + 50);

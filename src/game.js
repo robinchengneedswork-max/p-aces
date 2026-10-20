@@ -189,7 +189,7 @@ function respawnPlayer(g) {
   const p = g.plane;
   const pos = v3(p.pos.x, 0, p.pos.z);
   pos.y = groundHeight(pos.x, pos.z) + CONFIG.START_ALT;
-  g.plane = createPlane(pos, p.fwd);
+  g.plane = createPlane(pos, p.fwd, p.type);
   g.hp = CONFIG.PLAYER_HP;
   g.respawnT = 0;
   if (g.mode === 'range') {

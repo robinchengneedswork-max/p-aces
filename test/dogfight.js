@@ -9,7 +9,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
 vm.runInContext(src + '\n;this.__x = { CONFIG, SKILLS, createGame, gameUpdate, spawnBandit, createBandit, pilotStep, flightStep, createPlane, planeVelocity, groundHeight, makeRng, v3, vAdd, vSub, vScale, vNorm, vDist, vDot, missileTti };', ctx);
 const X = ctx.__x;
 const REPORT = process.argv[2] === 'report';

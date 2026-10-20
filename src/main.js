@@ -339,7 +339,7 @@ function frame(ts) {
     if (m) { SFX.warnMissile(m.dist < CONFIG.BREAK_DIST[1]); warnT = clamp(m.dist / 4000, 0.07, 0.3); }
     else if (game.warn.lock) { SFX.warnLock(); warnT = 0.45; }
   }
-  engineSet((game.plane.speed - CONFIG.SPEED_MIN) / (CONFIG.SPEED_MAX - CONFIG.SPEED_MIN), !game.plane.crashed);
+  engineSet((game.plane.speed - game.plane.spec.SPEED_MIN) / (game.plane.spec.SPEED_MAX - game.plane.spec.SPEED_MIN), !game.plane.crashed);
   for (const f of flashes) f.age += dt;
   flashes = flashes.filter(f => f.age < 1.4);
 

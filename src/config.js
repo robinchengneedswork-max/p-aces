@@ -62,6 +62,10 @@ const CONFIG = {
   GUN_RATE: 12,              // rounds/s
   GUN_SPEED: 900,
   GUN_LIFE: 1.4,
+  GUN_RANGE: 800,            // lead marker turns green inside this (m)…
+  GUN_LEAD_RANGE: 2500,      // …and is shown for the best target within this, and within…
+  GUN_LEAD_CONE: 40 * DEG,   // …this far off your nose
+  GUN_ASSIST_RANGE: 1100,    // magnetism works out to here
   MISSILE_SPEED: 420,
   MISSILE_TURN: 1.04,        // rad/s (× 0.8 with the planes). Missiles chase where you ARE (pure pursuit, no lead): then a hard
                              // break at the right moment beats one, flying straight never does. Yours
@@ -182,6 +186,8 @@ const CONFIG = {
     headGain: 11,            // radians of view per unit of nose offset (face widths)
     headDeadzone: 0.065,     // (user: slightly higher than 0.045)
     headSmooth: 0.35,        // One Euro min cutoff for the head
+    gunAssist: 3.5,          // degrees: with the gun sight this close to the lead marker, rounds go to it
+                             // (user couldn't land guns by hand; 0 = off)
     headSpring: 9,           // how stiffly the view chases the head (rad/s): settles in ~4/headSpring s
     headNeutral: null,       // { yaw, pitch } from calibration      // stick scheme: twisting the fist = rudder (leaks into rolls)
     neutral: null,           // { flat: {...}, stick: {...} } from calibration
@@ -203,6 +209,7 @@ const CONFIG = {
     { key: 'headGain', label: 'Head look gain', min: 1, max: 15, step: 0.5 },
     { key: 'headDeadzone', label: 'Head deadzone', min: 0, max: 0.1, step: 0.005 },
     { key: 'headSmooth', label: 'Head smooth (min cutoff)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'gunAssist', label: 'Gun assist (° of magnetism, 0 = off)', min: 0, max: 8, step: 0.5 },
     { key: 'headSpring', label: 'Head look glide (higher = snappier)', min: 3, max: 20, step: 0.5 },
   ],
   STORAGE_KEY: 'sky-ace-settings',

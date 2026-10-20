@@ -156,6 +156,30 @@ function hurtPlayer(g, dmg, pos) {
   }
 }
 
+// Gun firing solution: the best target ahead (closest to the nose, within GUN_LEAD_CONE and
+// GUN_LEAD_RANGE) and the direction to fire so the rounds meet it. Rounds carry the plane's own
+// velocity, so in the plane's moving frame the target drifts by (its velocity − ours); solve for
+// where it will be after the rounds' flight time (a few fixed-point steps converge).
+// → { target, dir, dist, off (angle between nose and dir), inRange } or null.
+function gunSolution(g) {
+  const p = g.plane;
+  if (p.crashed) return null;
+  const pv = planeVelocity(p);
+  let best = null;
+  for (const t of lockables(g)) {
+    const to = vSub(t.pos, p.pos), dist = vLen(to);
+    if (dist > CONFIG.GUN_LEAD_RANGE || dist < 1) continue;
+    const rel = vSub(t.vel || v3(0, 0, 0), pv);
+    let aim = to;
+    for (let i = 0; i < 4; i++) aim = vAdd(to, vScale(rel, vLen(aim) / CONFIG.GUN_SPEED));
+    const dir = vNorm(aim);
+    const off = Math.acos(clamp(vDot(dir, p.fwd), -1, 1));
+    if (off > CONFIG.GUN_LEAD_CONE) continue;
+    if (!best || off < best.off) best = { target: t, dir, dist, off, inRange: dist <= CONFIG.GUN_RANGE };
+  }
+  return best;
+}
+
 function fireBullet(g, from, dir, owner) {
   const side = (g.bullets.length % 2 ? 1 : -1) * 3;
   g.bullets.push({ pos: vAdd(from.pos, vScale(from.right, side)), vel: vAdd(vScale(dir, CONFIG.GUN_SPEED), planeVelocity(from)), age: 0, owner });
@@ -196,11 +220,15 @@ function gameUpdate(g, ctrl, dt) {
     flightStep(p, ctrl, dt, ctrl.assist);
     if (g.mode === 'range') updateRing(g, before);
 
-    // Gun
+    // Gun. Magnetism: with the sight within the assist angle of the lead marker (and close enough),
+    // the rounds go to the marker.
+    g.gunSol = gunSolution(g);
+    const assist = (ctrl.gunAssist ?? CONFIG.DEFAULTS.gunAssist) * DEG, sol = g.gunSol;
+    g.gunAssisted = !!sol && sol.off <= assist && sol.dist <= CONFIG.GUN_ASSIST_RANGE;
     g.gunAcc = ctrl.gun ? g.gunAcc + dt * CONFIG.GUN_RATE : Math.min(g.gunAcc, 1);
     while (ctrl.gun && g.gunAcc >= 1) {
       g.gunAcc -= 1;
-      fireBullet(g, p, p.fwd, 'player');
+      fireBullet(g, p, g.gunAssisted ? sol.dir : p.fwd, 'player');
       g.events.push({ type: 'gun', pos: p.pos });
     }
 
@@ -215,6 +243,7 @@ function gameUpdate(g, ctrl, dt) {
     }
   }
   syncPlayer(g);
+  if (p.crashed) { g.gunSol = null; g.gunAssisted = false; }
 
   if (g.mode === 'dogfight') updateBandits(g, dt);
   updateBullets(g, dt);

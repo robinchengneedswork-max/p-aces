@@ -274,6 +274,7 @@ function frame(ts) {
     yaw: useKb ? kb.yaw : controls.out.yaw,
     throttle: camera ? controls.out.throttle : kb.throttle,
     gun: keys.has('Space') || (camera && controls.out.gun),
+    gunAssist: settings.gunAssist,
     missile: (camera && controls.out.missile) || keys.has('KeyF'),
     assist: assistOn(settings),
   };

@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (195 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (201 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
@@ -283,3 +283,12 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     v9 resets saves. measureHand now also returns `dial`, the UNFOLDED knuckle angle: the folded
     ±90° angle flips sign exactly at 90°. Calibration stores `thr.dial`; the range sweep no longer
     sets rudder (it would undo the deliberate deadzone).
+- **Round 18 (2026-10-19): gun help** (user: "haven't been able to fly well enough to get the gun to
+  work"; likes the slip, keep it). `gunSolution(g)`: best target within 40° / 2.5 km, aim direction
+  solved in the plane's moving frame (rounds inherit our velocity → target drifts by its velocity −
+  ours; fixed-point on flight time). HUD **lead marker** drawn at the sight's 700 m depth (exact
+  alignment, chase-cam parallax <1°) + dotted line to its target; **colour = range** (user's idea):
+  dim beyond `GUN_RANGE` 800 m, green inside, filled dot when the assist has it. **Magnetism**:
+  sight within `gunAssist` 3.5° (slider, 0 = off) of the marker and ≤1100 m → rounds fire along the
+  solution. Bandits get no assist. Tests: sight on the marker hits a 70 m/s crosser at 600 m, sight
+  on the target misses, 3.2° off hits only with the assist.

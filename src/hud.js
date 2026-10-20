@@ -36,6 +36,7 @@ function drawHud(ctx, W, H, st) {
       ctx.stroke();
     }
     drawFlightPath(ctx, W, H, st);
+    drawLead(ctx, W, H, st);
     drawTargets(ctx, W, H, st);
     drawBandits(ctx, W, H, st);
     drawRingMarker(ctx, W, H, st);
@@ -286,6 +287,38 @@ function drawFlightPath(ctx, W, H, st) {
   ctx.moveTo(s.x + 7, s.y); ctx.lineTo(s.x + 19, s.y);
   ctx.moveTo(s.x, s.y - 7); ctx.lineTo(s.x, s.y - 14);
   ctx.stroke();
+}
+
+// Gun lead marker: where to put the gun sight so the rounds meet the target. Drawn at the sight's
+// own distance (so lining them up on screen is exact), with a thin line back to the target.
+// Dim = out of gun range, green = in range, filled = close enough that the gun assist takes over.
+function drawLead(ctx, W, H, st) {
+  const g = st.game, p = g.plane, sol = g.gunSol;
+  if (!sol) return;
+  const s = projectToScreen(st.world, vAdd(p.pos, vScale(sol.dir, 700)), W, H);
+  const t = projectToScreen(st.world, sol.target.pos, W, H);
+  if (!s.on) return;
+  const col = sol.inRange ? HUD.green : HUD.dim;
+  ctx.strokeStyle = col;
+  ctx.fillStyle = col;
+  ctx.lineWidth = sol.inRange ? 2 : 1.5;
+  if (t.on) {
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(t.x, t.y);
+    ctx.lineTo(s.x, s.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  if (g.gunAssisted && sol.inRange) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.lineWidth = 1.5;
 }
 
 // Bandits: a red diamond, name + health, and an edge arrow when off screen.

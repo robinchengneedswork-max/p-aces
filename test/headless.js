@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -823,6 +823,45 @@ console.log('duel (two laptops, in one process)');
   X.gameUpdate(C.g, ctrl0, 1 / 60);
   check("the other laptop's missile raises MISSILE with its distance", C.g.warn.missile && Math.abs(C.g.warn.missile.dist - 1200) < 120, C.g.warn.missile && Math.round(C.g.warn.missile.dist) + ' m');
   check("…and it never hits you here (their laptop decides)", C.g.hp === 100);
+}
+
+console.log('gun lead + assist');
+{
+  // One drone crossing left at 70 m/s, 600 m ahead (a huge circle ≈ a straight line).
+  const crossing = (dist, assist, aimFn) => {
+    const g = X.createGame(11);
+    const p = g.plane;
+    const R = 1e5, at = X.vAdd(p.pos, X.vScale(p.fwd, dist));
+    const d = { id: 999, kind: 'drone', center: X.v3(at.x, at.y, at.z - R), radius: R, ang: Math.PI / 2, dir: 1, pos: at, vel: X.v3(0, 0, 0), alive: true };
+    g.drones = [d];
+    g.ring = { pos: X.v3(0, -9999, 0), normal: X.v3(0, 0, -1) };
+    let shots = 0;
+    for (let i = 0; i < 60 && d.alive; i++) {
+      // Hold the nose wherever aimFn says (a perfect pilot), then fire.
+      d.vel = X.vScale(X.v3(-1, 0, 0), CONFIG.DRONE_SPEED);
+      const sol = X.gunSolution(g);
+      if (sol) {
+        const f = aimFn(sol, d, p);
+        p.fwd = f; p.right = X.vNorm(X.vCross(f, X.v3(0, 1, 0))); p.up = X.vCross(p.right, f); p.path = { ...f };
+      }
+      X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: i < 20, missile: false, assist: false, gunAssist: assist }, 1 / 60);
+      g.drones = g.drones.filter(x => x === d);
+      shots++;
+    }
+    return { killed: !d.alive, sol: X.gunSolution(g) };
+  };
+  const atLead = (sol) => sol.dir;
+  const atTarget = (sol, d, p) => X.vNorm(X.vSub(d.pos, p.pos));
+  const nearLead = (sol, d, p) => X.vRotate(sol.dir, X.v3(0, 1, 0), 3.2 * DEG);   // 34 m off at 600 m: clear of the 22 m hit zone
+  check('sight on the lead marker hits a crossing target (no assist)', crossing(600, 0, atLead).killed);
+  check('sight on the target itself misses it (that is why the marker exists)', !crossing(600, 0, atTarget).killed);
+  check('3.2° off the marker: the assist (3.5°) puts the rounds on', crossing(600, 3.5, nearLead).killed);
+  check('…and with the assist off, the same aim misses', !crossing(600, 0, nearLead).killed);
+  const g = X.createGame(12);
+  const p = g.plane;
+  const put = dist => { g.drones = [{ id: 1, kind: 'drone', pos: X.vAdd(p.pos, X.vScale(p.fwd, dist)), vel: X.v3(0, 0, 0), alive: true }]; return X.gunSolution(g); };
+  check('the marker is green (in range) inside 800 m, dim beyond', put(600).inRange && !put(1000).inRange);
+  check('no marker for a target behind you', (() => { g.drones = [{ id: 1, kind: 'drone', pos: X.vAdd(p.pos, X.vScale(p.fwd, -600)), vel: X.v3(0, 0, 0), alive: true }]; return X.gunSolution(g) === null; })());
 }
 
 console.log('game');

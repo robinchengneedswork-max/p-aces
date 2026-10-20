@@ -11,19 +11,19 @@ function createWorld(canvas, pixelRatio) {
   renderer.setPixelRatio(pixelRatio);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY);
-  scene.fog = new THREE.Fog(SKY, 2000, CONFIG.TERRAIN_SIZE * 0.48);
-  const camera = new THREE.PerspectiveCamera(65, 16 / 9, 1, 14000);
+  scene.fog = new THREE.Fog(SKY, 2000, CONFIG.FOG_BASE);
+  const camera = new THREE.PerspectiveCamera(65, 16 / 9, 1, CONFIG.FOG_MAX + 10000);
 
   scene.add(new THREE.HemisphereLight(0xdfefff, 0x4a5a3a, 0.75));
   const sun = new THREE.DirectionalLight(0xfff3dd, 0.85);
   sun.position.set(0.5, 1, 0.3);
   scene.add(sun);
 
-  const w = { renderer, scene, camera, terrain: makeTerrain(), sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
+  const w = { renderer, scene, camera, terrain: makeTerrain(), farTerrain: makeFarTerrain(), farCenter: null, sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
     drones: new Map(), bandits: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
     trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
-  scene.add(w.terrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
+  scene.add(w.terrain, w.farTerrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
   return w;
 }
 
@@ -34,6 +34,36 @@ function makeTerrain() {
   geo.userData.base = Float32Array.from(geo.attributes.position.array);
   const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 0 });
   return new THREE.Mesh(geo, mat);
+}
+
+// The far layer: same ground, coarse, drawn a little behind the detailed patch (polygon offset +
+// a few metres lower) so the detailed one always wins where they overlap.
+function makeFarTerrain() {
+  const geo = new THREE.PlaneGeometry(CONFIG.FAR_TERRAIN_SIZE, CONFIG.FAR_TERRAIN_SIZE, CONFIG.FAR_TERRAIN_SEGS, CONFIG.FAR_TERRAIN_SEGS);
+  geo.rotateX(-Math.PI / 2);
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3));
+  geo.userData.base = Float32Array.from(geo.attributes.position.array);
+  const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 0, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 4 });
+  return new THREE.Mesh(geo, mat);
+}
+
+function recenterFarTerrain(w, x, z) {
+  const R = CONFIG.FAR_RECENTER;
+  const cx = Math.round(x / R) * R, cz = Math.round(z / R) * R;
+  if (w.farCenter && w.farCenter.x === cx && w.farCenter.z === cz) return;
+  w.farCenter = { x: cx, z: cz };
+  const geo = w.farTerrain.geometry;
+  const pos = geo.attributes.position, col = geo.attributes.color, base = geo.userData.base;
+  for (let i = 0; i < pos.count; i++) {
+    const e = terrainVertex(base[i * 3] + cx, base[i * 3 + 2] + cz);
+    pos.array[i * 3 + 1] = e[0];
+    col.array[i * 3] = e[1]; col.array[i * 3 + 1] = e[2]; col.array[i * 3 + 2] = e[3];
+  }
+  pos.needsUpdate = true;
+  col.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  w.farTerrain.position.set(cx, -6, cz);
 }
 
 // Heights are baked around a centre; re-bake when the player wanders off it.
@@ -79,7 +109,7 @@ function terrainVertex(wx, wz) {
 }
 
 function makeSea() {
-  const geo = new THREE.PlaneGeometry(CONFIG.TERRAIN_SIZE * 1.5, CONFIG.TERRAIN_SIZE * 1.5);
+  const geo = new THREE.PlaneGeometry(CONFIG.FAR_TERRAIN_SIZE * 1.4, CONFIG.FAR_TERRAIN_SIZE * 1.4);
   geo.rotateX(-Math.PI / 2);
   return new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0x2f6f9f, shininess: 60, transparent: true, opacity: 0.88 }));
 }
@@ -378,7 +408,12 @@ function addBoom(w, pos, size) {
 function renderWorld(w, g, dt, now, look, ctrl) {
   const p = g.plane;
   recenterTerrain(w, p.pos.x, p.pos.z);
+  recenterFarTerrain(w, p.pos.x, p.pos.z);
   w.sea.position.set(p.pos.x, 0, p.pos.z);
+  // Fog opens up with altitude: low down it hides the detailed patch's edge, high up the far layer's.
+  const fogFar = Math.min(CONFIG.FOG_MAX, CONFIG.FOG_BASE + Math.max(0, p.pos.y) * CONFIG.FOG_PER_ALT);
+  w.scene.fog.far = fogFar;
+  w.scene.fog.near = Math.min(2000, fogFar * 0.4) + Math.max(0, p.pos.y) * 0.5;
 
   w.clouds.list.forEach((c, i) => {
     const dx = c.x - p.pos.x, dz = c.z - p.pos.z;
@@ -592,6 +627,7 @@ function styleMesh(o, on, grad) {
       m.userData.toon = new THREE.MeshToonMaterial({
         color: m.color, vertexColors: m.vertexColors, emissive: m.emissive ? m.emissive.clone().multiplyScalar(0.6) : new THREE.Color(0),
         transparent: m.transparent, opacity: m.opacity, side: m.side, depthWrite: m.depthWrite, gradientMap: grad,
+        polygonOffset: m.polygonOffset, polygonOffsetFactor: m.polygonOffsetFactor, polygonOffsetUnits: m.polygonOffsetUnits,
       });
       m.userData.toon.userData.orig = m;
     }

@@ -25,9 +25,9 @@ const CONFIG = {
   STALL_SPEED: 70,           // below this the nose drops on its own…
   STALL_DROP: 0.9,           // …at up to this rate (rad/s), and pulls fade out
   SPEED_FLOOR: 35,
-  G_ONSET: 6,                // sustained G above this builds strain = tunnel vision. Looks only: it never
-  G_STRAIN_TIME: 14,         // takes the stick (user). Builds at (G - onset) / this per second,
-  G_RECOVER: 0.35,           // drains this much per second below onset
+  G_ONSET: 5,                // sustained G above this builds strain = tunnel vision. Looks only: it never
+  G_STRAIN_TIME: 6,          // takes the stick (user). Builds at (G - onset) / this per second (a full pull
+  G_RECOVER: 0.5,            // shows within ~1 s, heavy by ~3 s); drains this much per second below onset
   REDOUT_G: -2.5,            // pushing past this tints the view red
   YAW_RATE: 0.35,
   MAX_BANK: 75 * DEG,        // assist: full stick = this bank angle
@@ -36,20 +36,26 @@ const CONFIG = {
   LOOP_PITCH: 0.3,           // assist: pulling at least this hard past vertical/inverted = looping
   LOOP_UP: 0.2,              // …"inverted" = canopy pointing less than this far up
   LOOP_VERTICAL: 0.85,       // …"past vertical" = nose this steep (sin of ~58°)
-  CEILING: 4000,
+  CEILING: 15000,
   CRASH_MARGIN: 4,
   RESPAWN_TIME: 2,
   VAPOR_MIN_RATE: 0.35,      // wingtip vapour starts when the nose swings this fast (rad/s)…
   VAPOR_FULL_RATE: 0.55,     // …and is full this much faster again (a full pull is 1.1 rad/s)
   VAPOR_LIFE: 1.4,           // seconds a trail lingers
   VAPOR_WIDTH: 0.35,         // half-width at the wingtip (m); widens as it drifts back
-  START_ALT: 700,
+  START_ALT: 8000,           // metres above the ground at start/respawn (user: "try 8k and 15k")
 
   // Terrain
   TERRAIN_SIZE: 9600,
   TERRAIN_SEGS: 120,
   TERRAIN_RECENTER: 800,
   TERRAIN_HEIGHT: 900,
+  FAR_TERRAIN_SIZE: 60000,   // a coarse ground layer under the detailed one, so from 8-15 km up there's
+  FAR_TERRAIN_SEGS: 120,     // ground to the horizon (500 m cells)…
+  FAR_RECENTER: 4000,        // …re-baked when you've flown this far
+  FOG_BASE: 4600,            // fog ends this far away near the ground, plus FOG_PER_ALT × altitude
+  FOG_PER_ALT: 1.6,
+  FOG_MAX: 30000,
 
   // Weapons + targets
   GUN_RATE: 12,              // rounds/s
@@ -111,6 +117,12 @@ const CONFIG = {
   JUMP_CONFIRM: 2,           // …unless it's still there after this many readings (recordings: real max 0.5)
   THROTTLE_LOW: 0.85, THROTTLE_HIGH: 0.3,  // image y of the throttle hand for 0 and full
   CALIB_COUNTDOWN: 3,
+  RANGE_TIME: 6,             // after centring: seconds to sweep both hands to their limits
+  RANGE_USE: 0.85,           // full deflection at this share of your swept reach (no straining)
+  RANGE_MIN: 0.2,            // reach below this (raw units) = you didn't move that way: keep the slider
+  RANGE_MAX: 2.5,
+  RANGE_MIN_SAMPLES: 5,
+  THROTTLE_MIN_TRAVEL: 0.08, // left hand must move this much of the image height to set the throttle range
   INPUT_EASE: 12,            // stick/rudder output glides toward the filtered input at this rate (1/s),
                              // every drawn frame: hand tracking only updates ~20x/s, and the steps
                              // between updates were most of the jitter (-58% on the recordings, no added lag)

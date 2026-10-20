@@ -80,6 +80,7 @@ function drawHud(ctx, W, H, st) {
 
   if (st.recorder) drawRecorder(ctx, W, H, st);
   else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, 'respawning…');
+  else if (st.calib && st.calib.phase === 'range') drawRangeSweep(ctx, W, H, st);
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
   else if (st.warn) {
@@ -161,6 +162,38 @@ function drawSpeedLines(ctx, W, H, st) {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+// Range sweep: instructions plus how far each direction has reached so far (1 = the slider's scale).
+function drawRangeSweep(ctx, W, H, st) {
+  const sw = st.calib.sweep;
+  bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
+    'Move to your COMFORTABLE limits: full pull, full push, roll left + right · left hand: high, low, turn both ways   (Esc skips)');
+  const reach = (xs, sign) => xs.reduce((m, v) => Math.max(m, v * sign), 0);
+  const rows = [
+    ['ROLL L', reach(sw.roll, -1)], ['ROLL R', reach(sw.roll, 1)],
+    ['PUSH', reach(sw.pitch, st.settings.invertPitch ? 1 : -1)], ['PULL', reach(sw.pitch, st.settings.invertPitch ? -1 : 1)],
+    ['RUDDER L', reach(sw.yaw, -1)], ['RUDDER R', reach(sw.yaw, 1)],
+  ];
+  const x0 = W / 2 - 150, y0 = H * 0.62;
+  ctx.font = '12px ' + HUD.font;
+  ctx.textAlign = 'right';
+  rows.forEach(([label, v], i) => {
+    const y = y0 + i * 18;
+    ctx.fillStyle = HUD.ink;
+    ctx.fillText(label, x0 - 8, y);
+    ctx.strokeStyle = HUD.dim;
+    ctx.strokeRect(x0, y - 6, 300, 12);
+    ctx.fillStyle = v >= CONFIG.RANGE_MIN / CONFIG.RANGE_USE ? HUD.green : HUD.amber;
+    ctx.fillRect(x0, y - 6, 300 * Math.min(1, v / 1.5), 12);
+  });
+  if (sw.cy.length) {
+    const travel = Math.max(...sw.cy) - Math.min(...sw.cy);
+    ctx.fillStyle = HUD.ink;
+    ctx.fillText('THROTTLE', x0 - 8, y0 + rows.length * 18);
+    ctx.fillStyle = travel > CONFIG.THROTTLE_MIN_TRAVEL ? HUD.green : HUD.amber;
+    ctx.fillRect(x0, y0 + rows.length * 18 - 6, 300 * Math.min(1, travel / 0.5), 12);
+  }
 }
 
 function bigText(ctx, W, H, text, color, sub) {
@@ -390,6 +423,11 @@ function drawGauges(ctx, W, H, st) {
   ctx.font = 'bold 15px ' + HUD.font;
   ctx.fillStyle = p.g > CONFIG.G_ONSET || p.g < CONFIG.REDOUT_G ? HUD.amber : HUD.green;
   ctx.fillText(p.g.toFixed(1) + ' G', W * 0.2, cy + 32);
+  // Energy hint: at best turning speed you out-turn anyone; slow, you can't.
+  const dv = p.speed - CONFIG.CORNER_SPEED;
+  ctx.font = '11px ' + HUD.font;
+  ctx.fillStyle = Math.abs(dv) < 25 ? HUD.cyan : dv < -50 ? HUD.amber : HUD.dim;
+  ctx.fillText(Math.abs(dv) < 25 ? 'BEST TURN' : dv < 0 ? 'SLOW — unload / dive' : 'FAST — pull to bleed', W * 0.2, cy + 50);
   if (p.stall > 0) {
     ctx.fillStyle = HUD.red;
     ctx.font = 'bold 18px ' + HUD.font;

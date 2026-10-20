@@ -17,7 +17,7 @@ let face = null;             // 6 mirrored face keypoints, or null
 let head = createHead();
 let clap = createClap();
 let recorder = null;          // gesture recording in progress (G)
-let calib = null;            // { left } seconds of countdown
+let calib = null;            // { phase: 'centre' | 'range', left: seconds, sweep }
 let flashes = [];
 let missileFlash = 0;
 let hurtFlash = 0, warnT = 0;   // red edge flash when hit; time to the next warning tone
@@ -77,8 +77,20 @@ function flash(text, color) {
 
 function startCalibration(seconds) {
   if (mode !== 'camera') return;
-  calib = { left: seconds || CONFIG.CALIB_COUNTDOWN };
+  calib = { phase: 'centre', left: seconds || CONFIG.CALIB_COUNTDOWN };
   SFX.calib();
+}
+
+// Second step: sweep both hands to their limits; each direction's reach becomes full deflection.
+function finishRange(skip) {
+  const sweep = calib.sweep;
+  calib = null;
+  if (skip) { flash('RANGE SKIPPED — kept the previous range', HUD.dim); return; }
+  const set = rangeSweepFinish(sweep, settings);
+  controls = createControls();
+  saveSettings();
+  SFX.ring();
+  flash(set.length ? 'RANGE SET: ' + set.join(', ') : 'NO MOVEMENT SEEN — range unchanged', set.length ? HUD.green : HUD.amber);
 }
 
 // Calibrates whatever it can see: the flying hand's centre and, if a face is visible, "forward".
@@ -93,7 +105,8 @@ function finishCalibration() {
   if (gotHand || gotHead) saveSettings();
   if (gotHand) {
     SFX.ring();
-    flash('CALIBRATED' + (gotHead ? ' (+ HEAD)' : ''), HUD.green);
+    flash('CENTRED' + (gotHead ? ' (+ HEAD)' : '') + ' — now sweep to your limits', HUD.green);
+    calib = { phase: 'range', left: CONFIG.RANGE_TIME, sweep: createRangeSweep() };
   } else {
     flash('NO HAND SEEN — PRESS C AGAIN', HUD.red);
   }
@@ -114,7 +127,8 @@ async function finishRecording() {
   // The recording's centred step is the freshest calibration there is: adopt it.
   const fresh = neutralFromRecording(rec);
   if (fresh) {
-    settings.neutral = { ...(settings.neutral || {}), [settings.scheme]: fresh };
+    const old = settings.neutral && settings.neutral[settings.scheme];
+    settings.neutral = { ...(settings.neutral || {}), [settings.scheme]: { ...fresh, range: old && old.range } };
     saveSettings();
     controls = createControls();
     flash('RE-CENTRED FROM RECORDING', HUD.green);
@@ -180,7 +194,8 @@ function frame(ts) {
       hands = toHands(res.hands);
       face = res.face ? res.face.map(k => ({ x: 1 - k.x, y: k.y })) : null;
       headUpdate(head, face, now, settings);
-      if (clapUpdate(clap, hands, now) && !recorder) {
+      if (calib && calib.phase === 'range') rangeSweepAdd(calib.sweep, hands, settings);
+      if (clapUpdate(clap, hands, now) && !recorder && !calib) {
         flash('CLAP CLAP — CALIBRATING', HUD.green);
         startCalibration(CONFIG.CLAP_COUNTDOWN);
       }
@@ -213,7 +228,7 @@ function frame(ts) {
 
   if (calib) {
     calib.left -= dt;
-    if (calib.left <= 0) finishCalibration();
+    if (calib.left <= 0) { if (calib.phase === 'range') finishRange(false); else finishCalibration(); }
   }
 
   // The game pauses while recording or calibrating, so nobody crashes into a hill holding
@@ -400,7 +415,7 @@ window.addEventListener('keydown', e => {
   if (!world) return;
   if (e.code === 'KeyD') { debug = !debug; document.body.classList.toggle('debug', debug); }
   if (e.code === 'KeyC') startCalibration();
-  if (e.code === 'Escape') { calib = null; if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); } }
+  if (e.code === 'Escape') { if (calib && calib.phase === 'range') finishRange(true); calib = null; if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); } }
   if (e.code === 'KeyG') startRecording();
   if (e.code === 'KeyV') world.view = world.view === 'chase' ? 'cockpit' : 'chase';
   if (e.code === 'KeyR') { game = createGame(Date.now() % 100000, game.mode); flash('RESET', HUD.ink); }

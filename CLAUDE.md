@@ -9,8 +9,8 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (175 checks, synthetic hands,
-no camera) and `node test/dogfight.js [report]` (18 checks: AI-vs-AI fights and missile dodges, ~1 min).
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (181 checks, synthetic hands,
+no camera) and `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -18,7 +18,8 @@ no camera) and `node test/dogfight.js [report]` (18 checks: AI-vs-AI fights and 
     from the camera (3D world landmarks), or hand height with `P`.
   - `2` **flight stick**: fist position off a calibrated centre = roll/pitch; twisting it = rudder.
 - **Other hand**: height = throttle, pinch thumb+index = gun, close the fist = missile (needs lock).
-- `C` 3-second calibration countdown: hold your neutral pose. Stored per scheme.
+- `C` (or double clap): 3 s to hold your centre, then a 6 s **range sweep** — move both hands to your
+  comfortable limits; each direction's reach becomes full deflection (Esc skips the sweep). Stored per scheme.
 - `B` toggles the test range (drones + rings) and **dogfight** (one bandit at a time that shoots back:
   rookie, rookie, regular, regular, then aces).
 - `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
@@ -218,3 +219,23 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   - Browser-verified (real-time headless Edge via CDP): 60 fps sim / 30 drawn; a rookie locked,
     launched, hit and gunned a passive player; screenshots of the bandit marker, tunnel vision and
     BREAK cue. **Not yet flown by the user.**
+- **Round 14 (2026-10-19), after the user's first dogfights: "lost 0 to 10 — could never beat him in
+  the turn or out-energy him", never saw tunnel vision, wanted calibration to set max range too,
+  then "start higher alt… try 8k and 15k".**
+  - **Range calibration**: after the centre countdown, a 6 s sweep (live reach bars on screen).
+    Per direction, 95th percentile of the sweep × `RANGE_USE` 0.85 = full deflection (`applyRange`,
+    stored as `neutral[scheme].range = { roll: [L, R], pitch: [-, +] }`, `neutral.thr = { roll, yaw,
+    cy: [top, bottom] }`). A direction you didn't move keeps the slider. Re-centring (C, recorder)
+    keeps the range. Most likely why the user lost: his hands only reached part of the stick
+    while bandits pull 60-100%.
+  - Tunnel vision sooner: onset 5 G, builds at (G-5)/6 per s (visible within ~1 s of a hard pull).
+  - Bandits: rookies pull ≤0.6 at ≤0.7 throttle, regulars 0.8 / 0.85 (aces unchanged); no missile
+    on the first merge (cooldown starts at 60%); regulars + aces **don't joust** (slide 12° off a
+    head-on pass and hold fire: they lose jousts to your bigger gun/their bigger hitbox) and chop
+    throttle to break a missile when fast (g-limited). HUD speed hint: BEST TURN / SLOW / FAST.
+  - Harness after: vs a pilot who shoots back, rookie/regular/ace last 23/55/145 s; an AI that only
+    dodges is now rarely caught (both just turn), so that matchup is reported, not checked.
+  - **Altitude**: start 8000 m above ground, ceiling 15000 (user's numbers, read as metres = the ALT
+    readout). Rendering: a coarse far terrain layer (60 km, 500 m cells, polygon-offset behind the
+    detailed patch), 84 km sea, fog far = 4600 + 1.6 × altitude (max 30 km), camera far 40 km.
+    Screenshots: ground to the horizon at 8 km with clouds below; 15 km is hazy; low level unchanged.

@@ -7,7 +7,7 @@ const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
 const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -379,6 +379,41 @@ console.log('input clean-up');
   check('…and the rudder too', Math.abs(k.out.yaw - yaw0) < 0.05, (k.out.yaw - yaw0).toFixed(3));
   for (let i = 0; i < 20; i++) X.controlsUpdate(k, [thr({ cy: 0.7 }), fly], 3 + i / 20, s);
   check('open again: throttle follows the hand once more', k.out.throttle < thr0 - 0.2, k.out.throttle.toFixed(2));
+}
+
+console.log('range calibration');
+{
+  const s = settings({ scheme: 'stick' });
+  const GRIP = 88;
+  const fist = o => hand({ fist: true, pitch: 0, cy: 0.6, cx: 0.6, ...o, roll: GRIP + (o.roll || 0) });
+  const thr = o => hand({ cx: 0.25, cy: 0.5, left: true, ...o });
+  X.calibrateNeutral(s, [thr({}), fist({})]);
+  // Before: a short 0.04 slide is under half roll; the left hand at 0.45-0.55 is mid throttle.
+  const before = drive([thr({}), fist({ cx: 0.64 })], 40, s).out.roll;
+  // Sweep: the fist only ever slides ±0.05 and leans ±8°; the left hand moves 0.4-0.6 and turns ±12°.
+  const sw = X.createRangeSweep();
+  for (let i = 0; i < 60; i++) {
+    const k = Math.sin(i / 6), j = Math.cos(i / 6);
+    X.rangeSweepAdd(sw, [thr({ cy: 0.5 + 0.1 * k, roll: 12 * j }), fist({ cx: 0.6 + 0.05 * k, lean: 8 * j })], s);
+  }
+  const set = X.rangeSweepFinish(sw, s);
+  check('the sweep sets every direction it saw', ['roll left', 'roll right', 'pull', 'push', 'rudder left', 'rudder right', 'throttle'].every(d => set.includes(d)), set.join(', '));
+  const after = drive([thr({}), fist({ cx: 0.64 })], 40, s).out.roll;
+  check('after the sweep a short slide reaches (near) full roll', before < 0.5 && after > 0.85, before.toFixed(2) + ' → ' + after.toFixed(2));
+  const lean = drive([thr({}), fist({ lean: 7 })], 40, s).out.pitch;
+  check('…and a short lean reaches (near) full pitch', lean > 0.8, lean.toFixed(2));
+  const top = drive([thr({ cy: 0.41 }), fist({})], 60, s).out.throttle, bot = drive([thr({ cy: 0.59 }), fist({})], 60, s).out.throttle;
+  check('throttle spans your own up/down travel', top > 0.95 && bot < 0.05, top.toFixed(2) + ' / ' + bot.toFixed(2));
+  // Re-centring keeps the range.
+  X.calibrateNeutral(s, [thr({}), fist({})]);
+  check('re-centring (C) keeps the swept range', !!s.neutral.stick.range && !!s.neutral.thr.cy && !!s.neutral.thr.yaw);
+  // A sweep where the hand never moved changes nothing.
+  const s2 = settings({ scheme: 'stick' });
+  X.calibrateNeutral(s2, [fist({})]);
+  const still = X.createRangeSweep();
+  for (let i = 0; i < 30; i++) X.rangeSweepAdd(still, [fist({ cx: 0.6 + 0.002 * Math.sin(i) })], s2);
+  const none = X.rangeSweepFinish(still, s2);
+  check('a sweep with no movement sets nothing (sliders keep working)', none.length === 0 && s2.neutral.stick.range.roll[1] === 1);
 }
 
 console.log('calibration');

@@ -172,6 +172,38 @@ function neutralFor(s) {
 
 // fresh: hands is a new camera reading (main calls this every drawn frame, and the tracker only
 // updates ~20x/s). Jump rejection and the gun hold count readings, not frames.
+// Flying-hand axes before your range calibration: 1 = the slider's "for full" setting.
+function flyAxes(m, n, s) {
+  const scale = n.scale || m.scale;
+  if (s.scheme === 'stick') {
+    const li = stickLean(m.axI, n.axI), lw = stickLean(m.axW, n.axW);
+    return {
+      roll: (m.cx - n.cx) / scale / s.stickThrow,
+      // Push/pull: the 3D and image estimates averaged (the most consistent across recordings).
+      // The image one swings about half as far, so its full scale is halved.
+      pitch: (lw.fwd / (s.stickPitch * DEG) + li.fwd / (s.stickPitch * CONFIG.STICK_IMAGE_PITCH * DEG)) / 2,
+    };
+  }
+  return {
+    roll: foldHalf(m.roll - n.roll) / (s.rollRange * DEG),
+    pitch: s.pitchSrc === 'height'
+      ? -(m.cy - n.cy) / scale / s.stickThrow
+      : wrapAngle(m.pitch - n.pitch) / (s.pitchRange * DEG),
+  };
+}
+
+// Rudder from the other hand turned like a dial, before range calibration.
+function thrYaw(m, s) {
+  const nt = s.neutral && s.neutral.thr;
+  return foldHalf(m.roll - (nt ? nt.roll : 0)) / (s.yawRange * DEG);
+}
+
+// r = [reach toward -, reach toward +] (positive numbers, in raw units): divide by your reach.
+function applyRange(v, r) {
+  if (!r) return v;
+  return v / (v < 0 ? r[0] : r[1]);
+}
+
 function controlsUpdate(c, hands, t, s, fresh = true) {
   const dt = Math.max(0, t - c.lastT);
   c.lastT = t;
@@ -206,19 +238,10 @@ function controlsUpdate(c, hands, t, s, fresh = true) {
   } else if (c.flyM) {
     const m = c.flyM;
     const scale = n.scale || m.scale;
-    let roll, pitch;
-    if (s.scheme === 'stick') {
-      const li = stickLean(m.axI, n.axI), lw = stickLean(m.axW, n.axW);
-      roll = (m.cx - n.cx) / scale / s.stickThrow;
-      // Push/pull: the 3D and image estimates averaged (the most consistent across recordings).
-      // The image one swings about half as far, so its full scale is halved.
-      pitch = (lw.fwd / (s.stickPitch * DEG) + li.fwd / (s.stickPitch * CONFIG.STICK_IMAGE_PITCH * DEG)) / 2;
-    } else {
-      roll = foldHalf(m.roll - n.roll) / (s.rollRange * DEG);
-      pitch = s.pitchSrc === 'height'
-        ? -(m.cy - n.cy) / scale / s.stickThrow
-        : wrapAngle(m.pitch - n.pitch) / (s.pitchRange * DEG);
-    }
+    const a = flyAxes(m, n, s);
+    // Your own reach, from the range sweep: each direction scaled so your comfortable limit = full.
+    const roll = applyRange(a.roll, n.range && n.range.roll);
+    let pitch = applyRange(a.pitch, n.range && n.range.pitch);
     if (s.invertPitch) pitch = -pitch;
     c.raw.roll = oneEuroStep(c.f.roll, roll, t, s.minCutoff, s.beta);
     // Pitch has the worse signal (it's a lean toward the camera): its own, usually lower, cutoff.
@@ -258,8 +281,8 @@ function controlsUpdate(c, hands, t, s, fresh = true) {
   if (thrFrozen) {
     // hold c.raw.yaw where it is
   } else if (c.thrM && s.thrRudder) {
-    const nr = (s.neutral && s.neutral.thr) ? s.neutral.thr.roll : 0;
-    const yaw = foldHalf(c.thrM.roll - nr) / (s.yawRange * DEG);
+    const nt = s.neutral && s.neutral.thr;
+    const yaw = applyRange(thrYaw(c.thrM, s), nt && nt.yaw);
     c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
   } else {
     c.raw.yaw *= Math.exp(-CONFIG.HAND_LOST_DECAY * 2 * dt);
@@ -271,7 +294,9 @@ function controlsUpdate(c, hands, t, s, fresh = true) {
   if (c.thrM) {
     const m = c.thrM;
     if (!thrFrozen) {
-      const target = clamp((CONFIG.THROTTLE_LOW - m.cy) / (CONFIG.THROTTLE_LOW - CONFIG.THROTTLE_HIGH), 0, 1);
+      const nt = s.neutral && s.neutral.thr, cyR = nt && nt.cy;   // [top, bottom] from the range sweep
+      const lo = cyR ? cyR[1] : CONFIG.THROTTLE_LOW, hi = cyR ? cyR[0] : CONFIG.THROTTLE_HIGH;
+      const target = clamp((lo - m.cy) / (lo - hi), 0, 1);
       c.out.throttle += (target - c.out.throttle) * (1 - Math.exp(-8 * dt));
       c.thrHist.push({ t, throttle: c.out.throttle, yaw: c.raw.yaw });
     }
@@ -336,13 +361,76 @@ function clapUpdate(cl, hands, t) {
   return false;
 }
 
+// Range sweep: after the centre is set, you move the stick (and the other hand) to its limits
+// for a few seconds. Each direction's reach becomes full deflection, so a short comfortable
+// throw still gets full roll/pull, and an over-sensitive axis gets calmed down.
+function createRangeSweep() {
+  return { roll: [], pitch: [], yaw: [], cy: [] };
+}
+
+function rangeSweepAdd(sw, hands, s) {
+  const { fly, thr } = assignHands(hands, s);
+  if (fly) {
+    const a = flyAxes(measureHand(fly), neutralFor(s), s);
+    sw.roll.push(a.roll);
+    sw.pitch.push(a.pitch);
+  }
+  if (thr) {
+    const m = measureHand(thr);
+    sw.yaw.push(thrYaw(m, s));
+    sw.cy.push(m.cy);
+  }
+}
+
+// q-th quantile of a list (q 0..1).
+function quantile(xs, q) {
+  if (!xs.length) return NaN;
+  const a = xs.slice().sort((x, y) => x - y);
+  return a[Math.min(a.length - 1, Math.max(0, Math.round(q * (a.length - 1))))];
+}
+
+// Reach each way = the 95th percentile of the sweep (ignores a glitch or two), times RANGE_USE
+// so full deflection comes a little before your limit. A direction you barely moved keeps the
+// slider's scale. Writes s.neutral; returns the directions it set (for the message).
+function rangeSweepFinish(sw, s) {
+  const C = CONFIG, set = [];
+  const reach = (xs, sign, name) => {
+    const side = xs.map(v => v * sign).filter(v => v > 0);
+    const r = quantile(side, 0.95) * C.RANGE_USE;
+    if (!(side.length >= C.RANGE_MIN_SAMPLES && r >= C.RANGE_MIN)) return 1;
+    set.push(name);
+    return clamp(r, C.RANGE_MIN, C.RANGE_MAX);
+  };
+  s.neutral = { ...(s.neutral || {}) };
+  const n = s.neutral[s.scheme];
+  if (n && sw.roll.length) {
+    s.neutral[s.scheme] = { ...n, range: {
+      roll: [reach(sw.roll, -1, 'roll left'), reach(sw.roll, 1, 'roll right')],
+      pitch: [reach(sw.pitch, -1, s.invertPitch ? 'pull' : 'push'), reach(sw.pitch, 1, s.invertPitch ? 'push' : 'pull')],
+    } };
+  }
+  if (sw.cy.length >= C.RANGE_MIN_SAMPLES) {
+    const nt = { ...(s.neutral.thr || { roll: 0 }) };
+    nt.yaw = [reach(sw.yaw, -1, 'rudder left'), reach(sw.yaw, 1, 'rudder right')];
+    const top = quantile(sw.cy, 0.05), bottom = quantile(sw.cy, 0.95);
+    if (bottom - top > C.THROTTLE_MIN_TRAVEL) {
+      const inset = (bottom - top) * (1 - C.RANGE_USE) / 2;
+      nt.cy = [top + inset, bottom - inset];
+      set.push('throttle');
+    }
+    s.neutral.thr = nt;
+  }
+  return set;
+}
+
 function calibrateNeutral(s, hands) {
   const { fly, thr } = assignHands(hands, s);
   if (!fly) return false;
   const m = measureHand(fly);
   s.neutral = { ...(s.neutral || {}) };
   // The rudder hand's resting angle, if it's in view (shared by both schemes).
-  if (thr) s.neutral.thr = { roll: measureHand(thr).roll };
-  s.neutral[s.scheme] = { roll: m.roll, pitch: m.pitch, cx: m.cx, cy: m.cy, scale: m.scale, axI: m.axI, axW: m.axW };
+  if (thr) s.neutral.thr = { ...(s.neutral.thr || {}), roll: measureHand(thr).roll };
+  const old = s.neutral[s.scheme];
+  s.neutral[s.scheme] = { roll: m.roll, pitch: m.pitch, cx: m.cx, cy: m.cy, scale: m.scale, axI: m.axI, axW: m.axW, range: old && old.range };
   return true;
 }

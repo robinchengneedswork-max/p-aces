@@ -9,13 +9,15 @@
 // Skill = how stale its picture of you is (reaction), how sloppy its aim, how hard it dares pull.
 
 // dodge: how far off the ideal distance (m) it starts its missile break; panic: chance it breaks far too early.
-// gunCone: trigger discipline (rookies spray). energy: below corner speed by more than this (m/s) it eases
+// joust: takes head-on gun passes (it loses them: your gun and its hitbox are bigger). Others slide
+// off to one side and hold fire until they can turn in behind. throttle: the most it uses — lower = less energy to fight with (user lost 0-10 to rookies flying
+// by hand: they out-turned and out-energied him). gunCone: trigger discipline (rookies spray). energy: below corner speed by more than this (m/s) it eases
 // off the pull to keep its speed (Infinity = never: rookies yank and bleed). G strain is looks only, so
 // pilots ignore it; energy is what makes hard turning tiring.
 const SKILLS = {
-  rookie:  { name: 'ROOKIE',  react: 0.5,  aim: 3.5 * DEG, pull: 0.75, gunRange: 650, gunCone: 5 * DEG,   missileCd: 16, energy: Infinity, breakAt: 0.55, dodge: 330, panic: 0.3, hp: 8,  reward: 200 },
-  regular: { name: 'REGULAR', react: 0.3,  aim: 2 * DEG,   pull: 0.9,  gunRange: 800, gunCone: 4 * DEG,   missileCd: 11, energy: 40, breakAt: 0.8,  dodge: 160, panic: 0.1, hp: 10, reward: 350 },
-  ace:     { name: 'ACE',     react: 0.15, aim: 0.8 * DEG, pull: 1,    gunRange: 900, gunCone: 3.5 * DEG, missileCd: 7,  energy: 15, breakAt: 1,    dodge: 70,  panic: 0,   hp: 16, reward: 800 },
+  rookie:  { name: 'ROOKIE',  react: 0.5,  aim: 3.5 * DEG, pull: 0.6,  throttle: 0.7,  joust: true,  gunRange: 650, gunCone: 5 * DEG,   missileCd: 16, energy: Infinity, breakAt: 0.55, dodge: 330, panic: 0.3, hp: 8,  reward: 200 },
+  regular: { name: 'REGULAR', react: 0.3,  aim: 2 * DEG,   pull: 0.8,  throttle: 0.85, joust: false, gunRange: 800, gunCone: 4 * DEG,   missileCd: 11, energy: 40, breakAt: 0.8,  dodge: 160, panic: 0.1, hp: 10, reward: 350 },
+  ace:     { name: 'ACE',     react: 0.15, aim: 0.8 * DEG, pull: 1,    throttle: 1,    joust: false, gunRange: 900, gunCone: 3.5 * DEG, missileCd: 7,  energy: 15, breakAt: 1,    dodge: 70,  panic: 0,   hp: 16, reward: 800 },
 };
 const DODGE_IDEAL = 1075;  // m: start the break mid CONFIG.BREAK_DIST
 
@@ -30,7 +32,7 @@ function createBandit(id, skill, pos, fwd, rng) {
     rng,
     pilot: { think: 0, seen: null, aim: v3(0, 0, 0), mode: 'attack', jinkT: 0, jinkRoll: 0, extendT: 0, dodgeFor: null, dodgeAt: 0 },
     gunAcc: 0, firing: false,
-    missileCd: rng() * 2,                 // ready by the merge
+    missileCd: sk.missileCd * 0.6,        // not on the first merge: get your bearings first
     lockT: 0,
   };
 }
@@ -114,7 +116,8 @@ function pilotStep(b, target, threats, dt) {
     perp = vLen(perp) > 0.1 ? vNorm(perp) : p.right;
     const s = steerTo(p, vAdd(p.pos, vScale(perp, 1000)), pullMax);
     ctrl = { roll: s.roll, pitch: pullMax, yaw: 0 };
-    throttle = 1;
+    // Fast = g-limited = turns wide: chop the throttle to get down toward corner speed.
+    throttle = p.speed > CONFIG.CORNER_SPEED + 20 ? 0 : 1;
   } else if (groundDanger(p, false)) {
     P.mode = 'recover';
     ctrl = recoverCtrl(p);
@@ -145,6 +148,10 @@ function pilotStep(b, target, threats, dt) {
     let aimDir = vNorm(vSub(lead, p.pos));
     aimDir = vRotate(aimDir, p.up, P.aim.x);
     aimDir = vRotate(aimDir, p.right, P.aim.y);
+    // Head-on and closing: a non-jouster aims ~12° off to whichever side it's already on.
+    const headOn = !sk.joust && target && target.plane && dist < 1500
+      && vDot(target.plane.fwd, vScale(toT, -1 / dist)) > 0.9 && vDot(p.fwd, vScale(toT, 1 / dist)) > 0.7;
+    if (headOn) aimDir = vRotate(aimDir, p.up, vDot(toT, p.right) > 0 ? 12 * DEG : -12 * DEG);
     const s = steerTo(p, vAdd(p.pos, vScale(aimDir, dist)), pullMax);
     ctrl = s;
     // Close and closing fast = about to overshoot: throttle back.
@@ -152,12 +159,12 @@ function pilotStep(b, target, threats, dt) {
     if (dist < 600 && closing > 40) throttle = 0.3;
     else if (dist > 2000) throttle = 1;
     // Fire inside its cone, or whenever the rounds would pass within ~15 m of the target.
-    fire = dist < sk.gunRange && (s.off < sk.gunCone || dist * Math.sin(s.off) < 15);
+    fire = !headOn && dist < sk.gunRange && (s.off < sk.gunCone || dist * Math.sin(s.off) < 15);
     lockOn = s.off < CONFIG.LOCK_CONE && dist < CONFIG.LOCK_RANGE && dist > CONFIG.ENEMY_MIN_RANGE;
   } else {
     P.mode = 'patrol';
     ctrl = recoverCtrl(p);
     ctrl.pitch = clamp((CONFIG.START_ALT + groundHeight(p.pos.x, p.pos.z) - p.pos.y) / 400, -0.3, 0.3);
   }
-  return { roll: ctrl.roll, pitch: ctrl.pitch, yaw: ctrl.yaw || 0, throttle, fire, lockOn };
+  return { roll: ctrl.roll, pitch: ctrl.pitch, yaw: ctrl.yaw || 0, throttle: Math.min(throttle, sk.throttle), fire, lockOn };
 }

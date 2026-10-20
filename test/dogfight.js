@@ -127,9 +127,8 @@ console.log('bandits vs a player who dodges but never shoots');
 {
   const N = 16, r = {};
   for (const sk of ['rookie', 'regular', 'ace']) r[sk] = matchup(sk, aiPlayer('regular', false), N, sk + ' vs dodging regular', 150);
-  check('an ace shoots down a dodging player (100 HP, breaks + dodges) in half the fights', r.ace.wins >= N * 0.5, r.ace.wins + '/' + N + ', median ' + r.ace.median.toFixed(0) + ' s');
-  check('skill matters: rookie < regular <= ace', r.rookie.wins < r.ace.wins && r.regular.wins <= r.ace.wins,
-    r.rookie.wins + ' / ' + r.regular.wins + ' / ' + r.ace.wins);
+  // Since bandits stopped jousting (round 14) an AI that only dodges is rarely caught: both just
+  // turn. That's reported, not checked; skill is measured below against a pilot who shoots.
   const crashes = r.rookie.crashes + r.regular.crashes + r.ace.crashes;
   check('bandits rarely fly into the ground in a real fight', crashes <= 2, crashes + ' of ' + 3 * N);
   const pc = r.rookie.pCrash + r.regular.pCrash + r.ace.pCrash;
@@ -143,6 +142,7 @@ console.log('bandits vs a player who shoots back');
     const r = matchup(sk, aiPlayer('regular'), N, sk + ' vs shooting regular', 150);
     life[sk] = r.life;
     if (sk === 'rookie') check('a rookie goes down to a regular pilot nearly every time', r.losses >= N * 0.8, r.losses + '/' + N);
+    if (sk === 'ace') check('an ace mostly survives a regular pilot', r.losses <= N * 0.4, r.losses + '/' + N + ' lost');
   }
   check('better bandits last longer', life.rookie < life.regular && life.regular < life.ace,
     life.rookie.toFixed(0) + ' / ' + life.regular.toFixed(0) + ' / ' + life.ace.toFixed(0) + ' s average');

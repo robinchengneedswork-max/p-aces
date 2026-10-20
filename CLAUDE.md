@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (215 checks, synthetic hands,
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (221 checks, synthetic hands,
 no camera) , `node test/dogfight.js [report]` (17 checks: AI-vs-AI fights and missile dodges, ~1 min)
 and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clients).
 
@@ -22,7 +22,7 @@ and `node test/duel.js` (20 checks: the LAN duel server with real WebSocket clie
 - `C` (or double clap): 3 s to hold your centre, then a 6 s **range sweep** — move both hands to your
   comfortable limits; each direction's reach becomes full deflection (Esc skips the sweep). Stored per scheme.
 - `N` spawns a **bomber** (range or dogfight, up to 3): a big four-engined target crossing ahead,
-  straight and level, never shoots back. Hits count anywhere on its shape; 6 rounds into an engine
+  straight and level; top, ball and tail gunners shoot back. Hits count anywhere on its shape; 6 rounds into an engine
   set it burning (drains HP). Shot down it falls burning to the ground.
 - `B` toggles the test range (drones + rings) and **dogfight** (one bandit at a time that shoots back:
   rookie, rookie, regular, regular, then aces).
@@ -310,3 +310,16 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   own frame (fuselage, wings to the 18 m tips, tail, 4 engines) — the first zone-based hit test,
   groundwork for WW2 zone damage. 60 HP, missile 20, engine 6 → burns at 1.2 HP/s. Killed: noses
   over, rolls, falls, `bomber-crash` on the ground. Model has three gunner bubbles (looks only).
+- **Round 21 (2026-10-20): bomber gunners + tracers.** User: "basic AI gunners — low initial aim
+  that moves closer if you just sit in the same spot"; "tracers more tracing".
+  - `updateGunners`: top (above the wings), ball (below), tail (70° cone behind), 900 m, 5 rds/s,
+    4 HP a hit, all led like your own sight. Aim error eases from 7° to 0.5° (τ 3 s) while your
+    line of sight from that gunner turns slower than 4°/s, back to 7° (τ 0.6 s) when you move; the
+    miss direction wanders slowly so rounds walk round you then onto you. Measured, holding still:
+    first hit 5-9 s, down ~2.5-5 s later (300-800 m, six or beam); weaving ±160 m at 500 m: 2 hits
+    in 20 s. Turrets are hit zones (3 hits = gunner out, "TAIL GUNNER OUT").
+  - Shot-down bombers now nose toward world down (pitching about their own wing while rolling
+    looped them forever — caught by the falling test once gunners changed the rng sequence).
+  - Tracers: camera-facing ribbons (WebGL lines are 1 px), ~100 m long but never longer than the
+    round has flown, width ∝ distance (~6 px), bright head → clear tail; yours yellow, others
+    red-orange. Normal blending: additive washed both to white against the pale sky.

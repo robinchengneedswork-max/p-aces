@@ -313,6 +313,7 @@ function frame(ts) {
     if (e.type === 'bomber') flash('BOMBER — crossing ahead', HUD.amber);
     if (e.type === 'engine-fire') { SFX.boom(); flash('ENGINE ON FIRE', HUD.amber); }
     if (e.type === 'bomber-crash') SFX.crash();
+    if (e.type === 'gunner-down') flash(e.name + ' GUNNER OUT', HUD.green);
     if (e.type === 'bandit') flash('BANDIT — ' + SKILLS[e.skill].name, HUD.red);
     if (e.type === 'hit') SFX.hit();
     if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.85, hurtFlash + 0.35); shake = Math.min(1, shake + e.dmg / 20); }

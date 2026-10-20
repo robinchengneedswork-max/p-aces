@@ -104,8 +104,8 @@ const CONFIG = {
   MISSILE_GIMBAL: 75 * DEG,  // target further off the seeker's nose than this = it loses you
   BANDIT_SPAWN_DIST: 3500,
 
-  // Bomber (N): a big four-engined target for gunnery practice that flies straight and level and
-  // never shoots back. Hit anywhere on its shape (BOMBER_PARTS); an engine that takes
+  // Bomber (N): a big four-engined target for gunnery practice that flies straight and level; its
+  // gunners shoot back (BOMBER_GUNNERS). Hit anywhere on its shape (BOMBER_PARTS); an engine that takes
   // BOMBER_ENGINE_HP burns and keeps costing it HP.
   BOMBER_SPEED: 130,
   BOMBER_HP: 60,             // gun rounds to bring it down (a missile is BOMBER_MISSILE_DMG)
@@ -127,7 +127,28 @@ const CONFIG = {
     { zone: 'wing', x: -17.5, y: 0, z: 1, r: 1.6 }, { zone: 'wing', x: 17.5, y: 0, z: 1, r: 1.6 },
     { zone: 'engine', engine: 0, x: -11, y: -0.3, z: -2.5, r: 2.1 }, { zone: 'engine', engine: 1, x: -5.5, y: -0.3, z: -3, r: 2.1 },
     { zone: 'engine', engine: 2, x: 5.5, y: -0.3, z: -3, r: 2.1 }, { zone: 'engine', engine: 3, x: 11, y: -0.3, z: -2.5, r: 2.1 },
+    { zone: 'gunner', gunner: 0, x: 0, y: 1.8, z: -6, r: 1.4 }, { zone: 'gunner', gunner: 1, x: 0, y: -1.8, z: -1, r: 1.4 },
+    { zone: 'gunner', gunner: 2, x: 0, y: 0.2, z: 13.4, r: 1.3 },
   ],
+  // Its gunners: top turret (anything above the wings), ball turret (below), tail (a cone behind).
+  // Aim starts loose and tightens while you hold a steady spot in their view (line of sight
+  // turning slower than GUNNER_STEADY): sit on its six and they walk the rounds onto you; keep
+  // moving across their view and they stay loose. A gunner hit GUNNER_HP times is out.
+  BOMBER_GUNNERS: [
+    { name: 'TOP', x: 0, y: 1.8, z: -6, covers: 'up' },
+    { name: 'BALL', x: 0, y: -1.8, z: -1, covers: 'down' },
+    { name: 'TAIL', x: 0, y: 0.2, z: 13.4, covers: 'back' },
+  ],
+  GUNNER_RANGE: 900,
+  GUNNER_RATE: 5,            // rounds/s each
+  GUNNER_DMG: 4,             // your HP per round
+  GUNNER_HP: 3,
+  GUNNER_ERR_MAX: 7 * DEG,   // aim error when you've just arrived / keep moving…
+  GUNNER_ERR_MIN: 0.5 * DEG, // …and once they've settled on you
+  GUNNER_SETTLE: 3,          // s: time constant to tighten while you hold still in their view…
+  GUNNER_UNSETTLE: 0.6,      // …and to loosen again when you move
+  GUNNER_STEADY: 4 * DEG,    // line of sight turning slower than this (rad/s) = "holding still"
+  GUNNER_SPREAD: 0.4 * DEG,
   WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
   // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal

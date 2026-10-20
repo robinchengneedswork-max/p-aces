@@ -351,15 +351,57 @@ function makeRing() {
   return ring;
 }
 
+// Tracers: every round is a glowing streak, a camera-facing ribbon (WebGL lines are always 1 px):
+// bright head fading to a clear tail. Yours are yellow, everyone else's red-orange. (Not additive:
+// over the pale sky additive washed every colour out to white.) The ribbon widens with distance so far rounds stay a few pixels wide.
+const TRACER_MAX = 700;
+const TRACER_LEN = 0.1;         // seconds of flight per streak (~100 m)
+const TRACER_PX = 0.01;         // width per metre of distance (~6 px at 720p)
+const TRACER_COLORS = {           // [head, tail]
+  mine: [[1, 0.95, 0.5], [1, 0.7, 0.1]],
+  theirs: [[1, 0.5, 0.25], [0.9, 0.15, 0.05]],
+};
+
 function makeTracers() {
-  const MAX = 500;
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX * 6), 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRACER_MAX * 4 * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRACER_MAX * 4 * 4), 4));
+  const idx = [];
+  for (let i = 0; i < TRACER_MAX; i++) { const a = i * 4; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  geo.setIndex(idx);
   geo.setDrawRange(0, 0);
-  const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffe27a }));
-  lines.frustumCulled = false;
-  lines.userData.max = MAX;
-  return lines;
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide
+  }));
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+function updateTracers(w, bullets) {
+  const pos = w.tracers.geometry.attributes.position, col = w.tracers.geometry.attributes.color;
+  const cam = w.camera.position;
+  let n = 0;
+  for (const b of bullets) {
+    if (n >= TRACER_MAX) break;
+    // Never longer than the round has flown, so a streak never starts behind the gun.
+    const tail = vSub(b.pos, vScale(b.vel, Math.min(TRACER_LEN, b.age)));
+    const dir = vSub(b.pos, tail);
+    if (vLen(dir) < 0.5) continue;
+    const toCam = v3(cam.x - b.pos.x, cam.y - b.pos.y, cam.z - b.pos.z);
+    const dist = vLen(toCam);
+    let side = vCross(dir, toCam);
+    if (vLen(side) < 1e-6) continue;
+    side = vScale(vNorm(side), Math.max(0.3, dist * TRACER_PX) / 2);
+    const h0 = vAdd(b.pos, side), h1 = vSub(b.pos, side), t0 = vAdd(tail, side), t1 = vSub(tail, side);
+    pos.array.set([h0.x, h0.y, h0.z, h1.x, h1.y, h1.z, t0.x, t0.y, t0.z, t1.x, t1.y, t1.z], n * 12);
+    const [H, T] = b.owner === 'player' ? TRACER_COLORS.mine : TRACER_COLORS.theirs;
+    const fade = 1 - Math.max(0, b.age - CONFIG.GUN_LIFE * 0.7) / (CONFIG.GUN_LIFE * 0.3);
+    col.array.set([...H, fade, ...H, fade, ...T, 0, ...T, 0], n * 16);
+    n++;
+  }
+  pos.needsUpdate = true;
+  col.needsUpdate = true;
+  w.tracers.geometry.setDrawRange(0, n * 6);
 }
 
 // Wingtip vapour: per tip, two crossed ribbons (one spanning the plane's up, one its wings), so
@@ -553,16 +595,7 @@ function renderWorld(w, g, dt, now, look, ctrl) {
     w.ring.lookAt(tv(vAdd(g.ring.pos, g.ring.normal)));
   }
 
-  const tp = w.tracers.geometry.attributes.position;
-  let n = 0;
-  for (const b of g.bullets) {
-    if (n >= w.tracers.userData.max) break;
-    const tail = vSub(b.pos, vScale(b.vel, 0.035));
-    tp.array.set([b.pos.x, b.pos.y, b.pos.z, tail.x, tail.y, tail.z], n * 6);
-    n++;
-  }
-  tp.needsUpdate = true;
-  w.tracers.geometry.setDrawRange(0, n * 2);
+  updateTracers(w, g.bullets);
 
   // Missiles: pooled cones, and a smoke puff per frame each.
   while (w.missiles.length < g.missiles.length) {

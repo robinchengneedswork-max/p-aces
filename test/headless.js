@@ -908,6 +908,51 @@ console.log('bomber');
   check('…it noses over and hits the ground, then is gone', crashed && !g4.bombers.includes(b4));
 }
 
+console.log('bomber gunners');
+{
+  const idle = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false };
+  // Fly formation with a bomber at an offset (in its frame) that may move: offset(t) → {back, up, side}.
+  const sit = (offset, secs, setup) => {
+    const g = X.createGame(31);
+    const b = X.spawnBomber(g);
+    if (setup) setup(g, b);
+    const P = b.plane, hits = [];
+    for (let i = 0; i < secs * 60; i++) {
+      const t = i / 60, o = offset(t);
+      const p = g.plane;
+      p.pos = X.vAdd(b.pos, X.vAdd(X.vScale(P.fwd, -o.back), X.vAdd(X.vScale(P.up, o.up), X.vScale(P.right, o.side || 0))));
+      p.fwd = { ...P.fwd }; p.up = { ...P.up }; p.right = { ...P.right }; p.path = { ...P.fwd }; p.speed = CONFIG.BOMBER_SPEED;
+      g.hp = 1e9;
+      X.gameUpdate(g, idle, 1 / 60);
+      for (const e of g.events) if (e.type === 'hurt') hits.push(t);
+    }
+    return { g, b, hits, fired: g.bullets.filter(x => x.owner === 'bomber').length };
+  };
+  const six = sit(() => ({ back: 500, up: 30 }), 12);
+  const early = six.hits.filter(t => t < 1.5).length, late = six.hits.filter(t => t > 8).length;
+  check('sitting on its six: the gunners start loose…', early <= 2, early + ' hits in the first 1.5 s');
+  check('…and walk the rounds onto you if you stay', late >= 15, late + ' hits in the last 4 s');
+  // Swinging across their view (≈9°/s at 500 m) keeps them loose.
+  const weave = sit(t => ({ back: 500, up: 30 + Math.sin(t * 0.6) * 160, side: Math.cos(t * 0.6) * 160 }), 12);
+  const wl = weave.hits.filter(t => t > 8).length;
+  check('moving across their view keeps them off you', wl < late / 3, wl + ' vs ' + late + ' hits in the last 4 s');
+  check('out of gun range they hold fire', sit(() => ({ back: 1200, up: 30 }), 4).fired === 0);
+  const silenced = sit(() => ({ back: 500, up: 30 }), 4, (g, b) => b.gunners.forEach(x => { x.hp = 0; }));
+  check('gunners that are out don\'t fire', silenced.fired === 0);
+  // Shooting a gunner's turret takes him out.
+  const g = X.createGame(32);
+  const b = X.spawnBomber(g);
+  const tail = CONFIG.BOMBER_PARTS.find(p => p.zone === 'gunner' && p.gunner === 2);
+  let out = false;
+  for (let i = 0; i < CONFIG.GUNNER_HP; i++) {
+    const at = X.vAdd(X.bomberPartPos(b, tail), X.vScale(b.vel, 1 / 60));
+    g.bullets.push({ pos: X.vAdd(at, X.v3(0, 300, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'player' });
+    X.gameUpdate(g, idle, 1 / 60);
+    out = out || g.events.some(e => e.type === 'gunner-down' && e.name === 'TAIL');
+  }
+  check('rounds into the tail turret put the tail gunner out', out && b.gunners[2].hp <= 0 && b.gunners[0].hp > 0);
+}
+
 console.log('gun lead + assist');
 {
   // One drone crossing left at 70 m/s, 600 m ahead (a huge circle ≈ a straight line).

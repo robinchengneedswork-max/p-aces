@@ -111,6 +111,7 @@ function spawnBomber(g) {
     id: g.nextId++, kind: 'bomber', plane, pos: plane.pos, vel: vScale(plane.fwd, plane.speed),
     hp: CONFIG.BOMBER_HP, maxHp: CONFIG.BOMBER_HP,
     engines: [0, 1, 2, 3].map(() => CONFIG.BOMBER_ENGINE_HP), burning: [false, false, false, false],
+    gunners: CONFIG.BOMBER_GUNNERS.map(G => ({ ...G, hp: CONFIG.GUNNER_HP, err: CONFIG.GUNNER_ERR_MAX, los: null, acc: 0, wander: g.rng() * 6.28, firing: false })),
     alive: true, spin: (g.rng() < 0.5 ? -1 : 1) * (0.15 + g.rng() * 0.2),
   };
   g.bombers.push(b);
@@ -144,6 +145,10 @@ function hitBomber(g, b, dmg, part, pos, how) {
     b.engines[i] -= dmg;
     if (b.engines[i] <= 0 && !b.burning[i]) { b.burning[i] = true; g.events.push({ type: 'engine-fire', pos }); }
   }
+  if (part && part.zone === 'gunner') {
+    const gu = b.gunners[part.gunner];
+    if (gu.hp > 0 && (gu.hp -= dmg) <= 0) g.events.push({ type: 'gunner-down', pos, name: gu.name });
+  }
   if (b.hp <= 0) killBomber(g, b, how);
 }
 
@@ -152,6 +157,49 @@ function killBomber(g, b, how) {
   g.kills++;
   g.score += CONFIG.BOMBER_REWARD;
   g.events.push({ type: 'kill', pos: b.pos, bomber: true, how });
+}
+
+// The bomber's gunners: each covers its side, leads you like your own sight does, and misses by
+// an error that tightens while your line of sight holds steady (see BOMBER_GUNNERS in config).
+function updateGunners(g, b, dt) {
+  const P = b.plane, Y = g.player;
+  for (const gu of b.gunners) {
+    gu.firing = false;
+    if (gu.hp <= 0) continue;
+    const at = bomberPartPos(b, gu);
+    const to = vSub(Y.pos, at), dist = vLen(to);
+    const u = vScale(to, 1 / (dist || 1));
+    const up = vDot(u, P.up), back = -vDot(u, P.fwd);
+    const covered = gu.covers === 'up' ? up > -0.1 : gu.covers === 'down' ? up < 0.1 : back > 0.35;
+    const can = Y.alive && covered && dist < CONFIG.GUNNER_RANGE;
+    // How fast you move across its view (the bomber flies straight, so world = its frame).
+    const rate = gu.los && dt > 0 ? Math.acos(clamp(vDot(gu.los, u), -1, 1)) / dt : Infinity;
+    gu.los = can ? u : null;
+    const steady = can && rate < CONFIG.GUNNER_STEADY;
+    const goal = steady ? CONFIG.GUNNER_ERR_MIN : CONFIG.GUNNER_ERR_MAX;
+    gu.err += (goal - gu.err) * (1 - Math.exp(-dt / (steady ? CONFIG.GUNNER_SETTLE : CONFIG.GUNNER_UNSETTLE)));
+    if (!can) { gu.acc = Math.min(gu.acc, 1); continue; }
+    gu.firing = true;
+    gu.wander += dt * 0.9;
+    gu.acc += dt * CONFIG.GUNNER_RATE;
+    while (gu.acc >= 1) {
+      gu.acc -= 1;
+      // Lead: rounds carry the bomber's velocity, so you drift by (your velocity − its).
+      const rel = vSub(Y.vel, b.vel);
+      let aim = to;
+      for (let i = 0; i < 4; i++) aim = vAdd(to, vScale(rel, vLen(aim) / CONFIG.GUN_SPEED));
+      aim = vNorm(aim);
+      // Miss by err in a slowly wandering direction (rounds walk round you, then onto you).
+      const side = vLen(vCross(aim, WORLD_UP)) > 1e-3 ? vNorm(vCross(aim, WORLD_UP)) : v3(1, 0, 0);
+      const vert = vCross(side, aim);
+      const s = CONFIG.GUNNER_SPREAD;
+      const ox = Math.cos(gu.wander) * Math.tan(gu.err) + (g.rng() - 0.5) * 2 * s;
+      const oy = Math.sin(gu.wander) * Math.tan(gu.err) + (g.rng() - 0.5) * 2 * s;
+      const dir = vNorm(vAdd(aim, vAdd(vScale(side, ox), vScale(vert, oy))));
+      g.bullets.push({ pos: at, vel: vAdd(vScale(dir, CONFIG.GUN_SPEED), b.vel), age: 0, owner: 'bomber', dmg: CONFIG.GUNNER_DMG });
+      g.events.push({ type: 'enemy-gun', pos: at });
+    }
+  }
 }
 
 // Alive: straight and level, burning engines eat its HP. Shot down: it noses over, rolls and
@@ -163,8 +211,11 @@ function updateBombers(g, dt) {
       const fires = b.burning.filter(Boolean).length;
       if (fires) { b.hp -= fires * CONFIG.BOMBER_BURN * dt; if (b.hp <= 0) killBomber(g, b, 'fire'); }
       if (vDist(b.pos, g.plane.pos) > CONFIG.BOMBER_MAX_DIST) b.gone = true;
+      if (b.alive) updateGunners(g, b, dt);
     } else {
-      if (P.fwd.y > -0.75) rotatePlane(P, P.right, -0.3 * dt);
+      // Nose toward the ground (world down, not its own belly: it is rolling as it falls).
+      const axis = vCross(P.fwd, v3(0, -1, 0));
+      if (P.fwd.y > -0.75 && vLen(axis) > 1e-3) rotatePlane(P, vNorm(axis), 0.3 * dt);
       rotatePlane(P, P.fwd, b.spin * dt);
       P.fwd = vNorm(P.fwd);
       P.right = vNorm(vCross(P.fwd, P.up));
@@ -442,7 +493,7 @@ function updateBullets(g, dt) {
     } else if (b.owner === 'remote') {
       // The other laptop's rounds: drawn here, but only their laptop decides what they hit.
     } else if (g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < CONFIG.PLANE_HIT_R) {
-      hurtPlayer(g, CONFIG.BANDIT_GUN_DMG, b.pos);
+      hurtPlayer(g, b.dmg || CONFIG.BANDIT_GUN_DMG, b.pos);
       b.age = 99;
     }
     if (b.pos.y < groundHeight(b.pos.x, b.pos.z)) b.age = 99;

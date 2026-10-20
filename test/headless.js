@@ -321,6 +321,66 @@ console.log('hand lost');
   check('hand gone for 2 s → stick springs back to centre', c.out.roll === 0, c.out.roll.toFixed(3));
 }
 
+console.log('input clean-up');
+{
+  const s = settings({ scheme: 'stick' });
+  const GRIP = 88;
+  const fist = o => hand({ fist: true, pitch: 0, cy: 0.6, ...o, roll: GRIP + (o.roll || 0) });
+  X.calibrateNeutral(s, [fist({})]);
+  // A one-reading glitch 3 palms away (the first recording's swapped hand) is ignored…
+  const c = drive([fist({ cx: 0.55 })], 30, s);
+  const held = c.out.roll;
+  X.controlsUpdate(c, [fist({ cx: 0.9 })], 1, s);
+  X.controlsUpdate(c, [fist({ cx: 0.55 })], 1 + 1 / 30, s);
+  check('a one-reading jump of 3 palms is ignored', Math.abs(c.out.roll - held) < 0.02, (c.out.roll - held).toFixed(3));
+  // …but a hand that stays over there really moved.
+  drive([fist({ cx: 0.9 })], 20, s, c, 2);
+  check('…a hand that stays there is believed after a few readings', c.out.roll > 0.8, c.out.roll.toFixed(2));
+  // A fast real move (0.4 palms per reading, the recordings' worst) is never rejected.
+  const f = X.createControls();
+  drive([fist({})], 10, s, f);
+  let rejected = 0;
+  for (let i = 0; i < 6; i++) { X.controlsUpdate(f, [fist({ cx: 0.5 + 0.048 * (i + 1) })], 1 + i / 20, s); if (f.jumped) rejected++; }
+  check('a fast real roll (0.4 palms/reading) is never rejected', rejected === 0, rejected + ' rejected');
+  // Pitch is filtered harder than roll.
+  const lean = (i, ax) => [fist({ lean: ax === 'p' ? (i % 2 ? 4 : -4) : 0, cx: ax === 'r' ? (i % 2 ? 0.51 : 0.49) : 0.5 })];
+  const jit = (ax, over) => { const c2 = X.createControls(); let w = 0; for (let i = 0; i < 60; i++) { X.controlsUpdate(c2, lean(i, ax), i / 20, { ...s, ...over }); if (i > 20) w = Math.max(w, Math.abs(ax === 'p' ? c2.raw.pitch : c2.raw.roll)); } return w; };
+  check('pitch smooth: a lower cutoff calms pitch jitter', jit('p', { pitchSmooth: 0.3 }) < jit('p', { pitchSmooth: 3 }) * 0.6);
+  check('pitch smooth leaves roll alone', jit('r', { pitchSmooth: 0.3 }) === jit('r', { pitchSmooth: 3 }));
+}
+{
+  const s = settings({ scheme: 'flat' });
+  const fly = hand({ cx: 0.7 });
+  const thr = o => hand({ cx: 0.3, cy: 0.5, left: true, ...o });
+  // Guns: one glitched pinch reading doesn't fire; a held pinch fires on its 2nd reading.
+  const c = drive([thr({}), fly], 10, s);
+  X.controlsUpdate(c, [thr({ pinch: true }), fly], 1, s);
+  const one = c.out.gun;
+  X.controlsUpdate(c, [thr({}), fly], 1.05, s);
+  check('a single-reading pinch does not fire the guns', !one && !c.out.gun);
+  X.controlsUpdate(c, [thr({ pinch: true }), fly], 2, s);
+  X.controlsUpdate(c, [thr({ pinch: true }), fly], 2.016, s, false);   // a drawn frame, no new reading
+  const notYet = c.out.gun;
+  X.controlsUpdate(c, [thr({ pinch: true }), fly], 2.05, s);
+  check('a held pinch fires on its second camera reading (drawn frames do not count)', !notYet && c.out.gun);
+  X.controlsUpdate(c, [thr({}), fly], 2.1, s);
+  check('…and stops on the first open reading', !c.out.gun);
+  // Missiles: instant, and a quick fist-open-fist-open fires two.
+  const m = drive([thr({}), fly], 10, s);
+  let missiles = 0, first = -1;
+  [1, 1, 0, 0, 1, 1, 0].forEach((k, i) => { X.controlsUpdate(m, [thr({ fist: !!k }), fly], 1 + i / 20, s); if (m.out.missile) { missiles++; if (first < 0) first = i; } });
+  check('missiles: instant on the first fist reading, and two quick fists fire two', missiles === 2 && first === 0, missiles + ' missiles, first at ' + first);
+  // A fist that drags the palm down doesn't cut the throttle or kick the rudder.
+  const k = drive([thr({ cy: 0.4 }), fly], 40, s);
+  const thr0 = k.out.throttle, yaw0 = k.out.yaw;
+  for (let i = 0; i < 4; i++) X.controlsUpdate(k, [thr({ cy: 0.4 + 0.03 * (i + 1), fist: i === 3, roll: 5 * (i + 1) }), fly], 2 + i / 20, s);
+  for (let i = 0; i < 6; i++) X.controlsUpdate(k, [thr({ cy: 0.52, fist: true, roll: 25 }), fly], 2.2 + i / 20, s);
+  check('a fist (palm dragged down + twisted) leaves throttle where it was', Math.abs(k.out.throttle - thr0) < 0.03, (k.out.throttle - thr0).toFixed(3));
+  check('…and the rudder too', Math.abs(k.out.yaw - yaw0) < 0.05, (k.out.yaw - yaw0).toFixed(3));
+  for (let i = 0; i < 20; i++) X.controlsUpdate(k, [thr({ cy: 0.7 }), fly], 3 + i / 20, s);
+  check('open again: throttle follows the hand once more', k.out.throttle < thr0 - 0.2, k.out.throttle.toFixed(2));
+}
+
 console.log('calibration');
 {
   const s = settings({ scheme: 'flat' });

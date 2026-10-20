@@ -9,7 +9,7 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying. Tests: `node test/headless.js` (57 checks, synthetic hands, no camera).
+keyboard flying. Tests: `node test/headless.js` (154 checks, synthetic hands, no camera).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -163,3 +163,21 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
   the fake-camera numbers.
 - Next: user flies at the 30 cap; if tracking still suffers, consider adaptive cap (lower the
   draw rate when tracking Hz drops).
+- **Round 12 (2026-10-19): input clean-up** (from a survey of how people clean MediaPipe input).
+  Already had: One Euro, deadzone + expo, rate stick, clap calibration, lost-hand hold/decay,
+  pinch/fist hysteresis. Added:
+  - **Impossible-jump rejection**: flying-hand palm moving > `JUMP_MAX` 1.0 palm lengths in one
+    reading is held for up to `JUMP_CONFIRM` 2 readings, then believed. Measured on the 4
+    recordings: real moves peak at 0.41-0.50 palms/reading; rec 1's 3-4 palm leaps were the
+    swapped hand. Not applied after a dropout.
+  - **`pitchSmooth`** 0.7: pitch has its own One Euro min cutoff (slider), lower than roll's 1.0.
+  - **Guns** need the pinch for `GUN_HOLD` 2 camera readings (~0.1 s); release is instant.
+    **Missiles are deliberately NOT debounced** (user: "we need to be able to fire off the
+    missiles really quick") — hysteresis only, fire on the first fist reading.
+  - **Fist freeze**: on a fist, throttle + rudder roll back to their value `FIST_ROLLBACK` 0.2 s
+    ago (before the fingers began curling) and hold until the hand has been open `FIST_SETTLE`
+    0.2 s. Not done for pinch: rudder corrections while gunning are the point of the rudder.
+  - `controlsUpdate(..., fresh)`: main calls it every drawn frame but readings come ~20/s, so
+    jump/gun counts step only on fresh readings.
+  - None of this tested on camera yet; whether a real fist actually drags throttle is unmeasured
+    (the recorder has no left-hand steps).

@@ -64,6 +64,11 @@ const CONFIG = {
   HAND_LOST_DECAY: 3,        // then decays to centre at this rate (1/s)
   PINCH_ON: 0.32, PINCH_OFF: 0.5,
   FIST_ON: 1.2, FIST_OFF: 1.5,
+  GUN_HOLD: 2,               // guns need the pinch for this many camera readings (~0.1 s); missiles are instant
+  FIST_ROLLBACK: 0.2,        // on a fist, throttle + rudder go back to where they were this long ago…
+  FIST_SETTLE: 0.2,          // …and hold until the hand has been open this long
+  JUMP_MAX: 1.0,             // flying hand moving further than this (palm lengths) in one reading = glitch…
+  JUMP_CONFIRM: 2,           // …unless it's still there after this many readings (recordings: real max 0.5)
   THROTTLE_LOW: 0.85, THROTTLE_HIGH: 0.3,  // image y of the throttle hand for 0 and full
   CALIB_COUNTDOWN: 3,
   INPUT_EASE: 12,            // stick/rudder output glides toward the filtered input at this rate (1/s),
@@ -104,6 +109,7 @@ const CONFIG = {
     deadzone: 0.12,
     expo: 1.4,
     minCutoff: 1.0,          // One Euro filter: jitter vs lag
+    pitchSmooth: 0.7,        // pitch's own min cutoff: its signal is noisier, so it's filtered harder
     beta: 0.6,
     renderScale: 1,          // pixels per CSS pixel; lower = faster on a laptop GPU
     maxFps: 30,              // normal look: draw at most this often. Drawing shares the GPU with hand
@@ -128,6 +134,7 @@ const CONFIG = {
     { key: 'deadzone', label: 'Deadzone', min: 0, max: 0.4, step: 0.01 },
     { key: 'expo', label: 'Expo (1 = linear)', min: 1, max: 3, step: 0.05 },
     { key: 'minCutoff', label: 'Smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'pitchSmooth', label: 'Pitch smooth (min cutoff)', min: 0.1, max: 5, step: 0.1 },
     { key: 'beta', label: 'Responsiveness (beta)', min: 0, max: 5, step: 0.1 },
     { key: 'renderScale', label: 'Render scale', min: 0.5, max: 2, step: 0.25 },
     { key: 'maxFps', label: 'Max draw fps (normal look)', min: 20, max: 60, step: 5 },

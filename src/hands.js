@@ -132,7 +132,13 @@ function createControls() {
     edge: false,                           // flying hand near the edge of the camera view
     lastT: 0,
     pinched: false,
+    pinchReads: 0,                         // fresh readings the pinch has been held
     fist: false,
+    flyLast: null,                         // last accepted flying-hand palm { cx, cy, scale }
+    jumps: 0,                              // readings rejected in a row as impossible jumps
+    jumped: false,                         // this reading was rejected
+    thrHist: [],                           // { t, throttle, yaw } over the last ~0.3 s
+    thrFrozenUntil: -1,                    // throttle + rudder held until then (fist settling)
   };
 }
 
@@ -164,7 +170,9 @@ function neutralFor(s) {
   return isCalibrated(s) ? s.neutral[s.scheme] : DEFAULT_NEUTRAL[s.scheme];
 }
 
-function controlsUpdate(c, hands, t, s) {
+// fresh: hands is a new camera reading (main calls this every drawn frame, and the tracker only
+// updates ~20x/s). Jump rejection and the gun hold count readings, not frames.
+function controlsUpdate(c, hands, t, s, fresh = true) {
   const dt = Math.max(0, t - c.lastT);
   c.lastT = t;
   c.out.missile = false;
@@ -176,7 +184,26 @@ function controlsUpdate(c, hands, t, s) {
   c.flyM = fly ? measureHand(fly) : null;
   c.thrM = thr ? measureHand(thr) : null;
 
-  if (c.flyM) {
+  // Impossible jump: real moves on the recordings top out at ~0.5 palm lengths per reading; a
+  // swapped or glitched hand leaps 3-4. Hold the last input for up to JUMP_CONFIRM readings, and
+  // if the hand is still over there it really moved. After a dropout, wherever it comes back is fine.
+  if (fresh) {
+    c.jumped = false;
+    const L = c.flyLast, hold = s.scheme === 'stick' ? CONFIG.STICK_LOST_HOLD : CONFIG.HAND_LOST_HOLD;
+    if (c.flyM && L && t - c.flySeen <= hold
+      && Math.hypot(c.flyM.cx - L.cx, c.flyM.cy - L.cy) / L.scale > CONFIG.JUMP_MAX
+      && c.jumps < CONFIG.JUMP_CONFIRM) {
+      c.jumps++;
+      c.jumped = true;
+    } else if (c.flyM) {
+      c.jumps = 0;
+      c.flyLast = { cx: c.flyM.cx, cy: c.flyM.cy, scale: c.flyM.scale };
+    }
+  }
+
+  if (c.flyM && c.jumped) {
+    c.flySeen = t;                         // a hand is there; just not believable yet — hold
+  } else if (c.flyM) {
     const m = c.flyM;
     const scale = n.scale || m.scale;
     let roll, pitch;
@@ -194,7 +221,8 @@ function controlsUpdate(c, hands, t, s) {
     }
     if (s.invertPitch) pitch = -pitch;
     c.raw.roll = oneEuroStep(c.f.roll, roll, t, s.minCutoff, s.beta);
-    c.raw.pitch = oneEuroStep(c.f.pitch, pitch, t, s.minCutoff, s.beta);
+    // Pitch has the worse signal (it's a lean toward the camera): its own, usually lower, cutoff.
+    c.raw.pitch = oneEuroStep(c.f.pitch, pitch, t, s.pitchSmooth ?? s.minCutoff, s.beta);
     c.flySeen = t;
     // Still hand that's still steering = the centre has drifted (sat closer, moved the stick).
     const moved = c.still && Math.hypot(m.cx - c.still.cx, m.cy - c.still.cy) / scale > CONFIG.STILL_MOVE;
@@ -214,7 +242,22 @@ function controlsUpdate(c, hands, t, s) {
   c.out.roll += (shapeAxis(c.raw.roll, s) - c.out.roll) * ease;
   c.out.pitch += (shapeAxis(c.raw.pitch, s) - c.out.pitch) * ease;
 
-  if (c.thrM && s.thrRudder) {
+  // Closing a fist tugs the palm and knuckles, so a missile would also nudge throttle and rudder.
+  // On the fist, roll both back to just before the fingers started curling and hold them
+  // until the hand has been open again for a moment. Missiles themselves fire instantly.
+  const fistNow = !!c.thrM && (c.fist ? c.thrM.open < CONFIG.FIST_OFF : c.thrM.open < CONFIG.FIST_ON);
+  if (fistNow && !c.fist) {
+    // The value as of FIST_ROLLBACK ago (or the oldest kept, if the hand is newer than that).
+    const old = c.thrHist.filter(h => h.t <= t - CONFIG.FIST_ROLLBACK);
+    const before = old.length ? old[old.length - 1] : c.thrHist[0];
+    if (before) { c.out.throttle = before.throttle; c.raw.yaw = before.yaw; }
+  }
+  if (fistNow) c.thrFrozenUntil = t + CONFIG.FIST_SETTLE;
+  const thrFrozen = t < c.thrFrozenUntil;
+
+  if (thrFrozen) {
+    // hold c.raw.yaw where it is
+  } else if (c.thrM && s.thrRudder) {
     const nr = (s.neutral && s.neutral.thr) ? s.neutral.thr.roll : 0;
     const yaw = foldHalf(c.thrM.roll - nr) / (s.yawRange * DEG);
     c.raw.yaw = oneEuroStep(c.f.yaw, yaw, t, s.minCutoff, s.beta);
@@ -227,18 +270,27 @@ function controlsUpdate(c, hands, t, s) {
 
   if (c.thrM) {
     const m = c.thrM;
-    const target = clamp((CONFIG.THROTTLE_LOW - m.cy) / (CONFIG.THROTTLE_LOW - CONFIG.THROTTLE_HIGH), 0, 1);
-    c.out.throttle += (target - c.out.throttle) * (1 - Math.exp(-8 * dt));
+    if (!thrFrozen) {
+      const target = clamp((CONFIG.THROTTLE_LOW - m.cy) / (CONFIG.THROTTLE_LOW - CONFIG.THROTTLE_HIGH), 0, 1);
+      c.out.throttle += (target - c.out.throttle) * (1 - Math.exp(-8 * dt));
+      c.thrHist.push({ t, throttle: c.out.throttle, yaw: c.raw.yaw });
+    }
     const wasFist = c.fist;
-    c.fist = c.fist ? m.open < CONFIG.FIST_OFF : m.open < CONFIG.FIST_ON;
+    c.fist = fistNow;
     c.pinched = c.pinched ? m.pinch < CONFIG.PINCH_OFF : m.pinch < CONFIG.PINCH_ON;
-    c.out.gun = c.pinched && !c.fist;
+    // Guns wait for the pinch to hold GUN_HOLD readings (one glitched frame won't fire); release is
+    // immediate. Missiles stay instant: hysteresis alone keeps them clean, and they need to be quick.
+    if (!c.pinched) c.pinchReads = 0;
+    else if (fresh) c.pinchReads++;
+    c.out.gun = c.pinchReads >= CONFIG.GUN_HOLD && !c.fist;
     c.out.missile = c.fist && !wasFist;
   } else {
     c.out.gun = false;
     c.pinched = false;
+    c.pinchReads = 0;
     c.fist = false;
   }
+  while (c.thrHist.length > 1 && c.thrHist[1].t <= t - 0.3) c.thrHist.shift();   // keep one at or before 0.3 s ago
   return c;
 }
 

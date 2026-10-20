@@ -9,7 +9,8 @@ test/tools/serve.js off it). On Vercel the recorder downloads instead of saving 
 
 Run: `start.bat` → `http://localhost:8068/` (MediaPipe's wasm/model can't load from `file://`;
 localhost also satisfies the camera's secure-context rule). `index.html?keys` skips straight to
-keyboard flying. Tests: `node test/headless.js` (154 checks, synthetic hands, no camera).
+keyboard flying, `?dogfight` starts in dogfight mode. Tests: `node test/headless.js` (175 checks, synthetic hands,
+no camera) and `node test/dogfight.js [report]` (18 checks: AI-vs-AI fights and missile dodges, ~1 min).
 
 ## Controls
 - **Flying hand** (right by default, `H` swaps):
@@ -18,6 +19,8 @@ keyboard flying. Tests: `node test/headless.js` (154 checks, synthetic hands, no
   - `2` **flight stick**: fist position off a calibrated centre = roll/pitch; twisting it = rudder.
 - **Other hand**: height = throttle, pinch thumb+index = gun, close the fist = missile (needs lock).
 - `C` 3-second calibration countdown: hold your neutral pose. Stored per scheme.
+- `B` toggles the test range (drones + rings) and **dogfight** (one bandit at a time that shoots back:
+  rookie, rookie, regular, regular, then aces).
 - `M` RATE (stick = how fast it rolls/pitches; hold over = aileron roll; the stick default) / ASSIST (hand angle = bank angle, banks turn; the flat-hand default).
 - Keyboard always works and overrides while held: arrows (down = pull up), Q/E yaw, W/S throttle,
   Space guns, F missile. `V` chase/cockpit, `D` debug panel + camera view, `R` reset.
@@ -181,3 +184,37 @@ wasm (copied from light-gun) + `hand_landmarker.task`.
     jump/gun counts step only on fresh readings.
   - None of this tested on camera yet; whether a real fist actually drags throttle is unmeasured
     (the recorder has no left-hand steps).
+- **Round 13 (2026-10-19): light flight model + AI bandits.** User: Ace Combat-level, "a little slip
+  makes the high-g manoeuvres cooler", light G effects.
+  - **Flight (`flight.js`)**: the nose still answers the stick instantly; realism only sets limits and
+    costs. Pull rate peaks at `CORNER_SPEED` 170 (∝ speed^0.8 below, ∝ 1/speed above = g limit);
+    turns bleed speed (`TURN_BLEED` × (G-1)²), climbs cost / dives gain (`CLIMB_DRAG` 55), stall
+    below 70 (nose falls, pulls fade), roll weaker when slow. **Slip**: the flight path (`p.path`)
+    trails the nose (`SLIP_GRIP` 9/s at corner speed → ~7° in a full pull); position moves along
+    the path. **G** = path turn rate × speed / `A_PER_G` + up.y (full pull at cruise ≈ 8.5 G).
+    HUD: G meter, cyan flight-path marker (the gap to the pipper is the slip), STALL.
+  - **G strain is looks only** (user: G-LOC shouldn't force a blackout; AI doesn't care): strain
+    builds above 6 G and draws tunnel vision (edges grey and close in); negative G tints red. It
+    never touches the controls. Hard-turn "fatigue" is the energy bleed.
+  - **AI (`ai.js`)**: a bandit is a plane through the same `flightStep` (rate mode), flown by
+    `pilotStep` → the same ctrl a hand makes. Lift-vector-on-target steering; priorities: imminent
+    ground → dodge missile → soft ground → break when on its six → extend when slow → lead-pursuit
+    attack (+ guns / missile lock). Skill = reaction, aim error, pull, trigger cone, dodge timing,
+    energy discipline (rookies yank and bleed).
+  - **Missiles are pure pursuit** (no lead). With lead prediction a break could never work (a pulling
+    plane strays only ~7 m from the prediction). Swept: the dodge window as a TIME varies 3× with
+    aspect, as a DISTANCE it doesn't — a full pull with the missile **0.9–1.25 km** away
+    (`BREAK_DIST`, ~2 missile turn radii) beats it from behind, beside or head-on; straight or late
+    = hit. HUD: LOCK WARNING, MISSILE + distance, "BREAK! PULL HARD" in the window; warning tones.
+    Enemy missiles turn 1.1 rad/s, yours 1.3 (narrower window for bandits). Bandits don't launch
+    inside 600 m.
+  - **Balance** (`test/dogfight.js report`): the player keeps a human's edge (100 HP = 20 rounds,
+    0.6 s lock, 1.2 s missile cooldown vs bandit 8-16 hits), so AI-vs-AI "who wins" means little.
+    Measured instead: vs a player who only dodges, rookie / regular / ace win 3 / 6 / 9 of 16;
+    vs one who shoots back they last 31 / 92 / 95 s on average; no bandit hit terrain in 144 fights.
+    Found by the harness: ace holding full pull lost (bled slow) → energy discipline; bandits
+    culled at 9 km respawned mid-fight; `pilotStep` crashed on a dead player (would have frozen the
+    game on SHOT DOWN).
+  - Browser-verified (real-time headless Edge via CDP): 60 fps sim / 30 drawn; a rookie locked,
+    launched, hit and gunned a passive player; screenshots of the bandit marker, tunnel vision and
+    BREAK cue. **Not yet flown by the user.**

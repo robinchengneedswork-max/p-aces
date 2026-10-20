@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'flight.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -524,6 +524,18 @@ console.log('gesture recorder');
 }
 
 console.log('flight');
+// Full pull from level until the top of the loop (inverted, heading back) or all the way round.
+function loopUntil(assist, until) {
+  const p = X.createPlane(X.v3(0, 3000, 0));
+  let topped = false, t = 0;
+  for (; t < 20; t += 1 / 60) {
+    X.flightStep(p, { roll: 0, pitch: 1, yaw: 0, throttle: 0.5 }, 1 / 60, assist);
+    if (p.up.y < -0.97 && p.fwd.z > 0.97) { topped = true; if (until === 'top') break; }
+    if (topped && p.fwd.y >= 0 && p.fwd.z < 0) break;
+  }
+  p.t = t;
+  return p;
+}
 function fly(ctrl, secs, assist, plane) {
   const p = plane || X.createPlane(X.v3(0, 3000, 0));
   for (let i = 0; i < secs * 60; i++) X.flightStep(p, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, ...ctrl }, 1 / 60, assist);
@@ -559,19 +571,19 @@ function fly(ctrl, secs, assist, plane) {
       if (q.up.y < -0.95 && q.fwd.z > 0.9) inverted = true;
     }
     check('assist: holding full pull goes over the top, upside down', inverted, 'min up.y ' + minUp.toFixed(2));
-    const loop = fly({ pitch: 1 }, 2 * Math.PI / CONFIG.PITCH_RATE, true);
+    const loop = loopUntil(true, 'round');
     check('assist: …and on round a full loop, heading unchanged', loop.fwd.z < -0.97 && Math.abs(loop.fwd.x) < 0.05 && loop.up.y > 0.97,
-      'fwd ' + loop.fwd.x.toFixed(2) + ',' + loop.fwd.y.toFixed(2) + ',' + loop.fwd.z.toFixed(2));
+      'fwd ' + loop.fwd.x.toFixed(2) + ',' + loop.fwd.y.toFixed(2) + ',' + loop.fwd.z.toFixed(2) + ' after ' + loop.t.toFixed(1) + ' s');
     // Pull to inverted at the top, then let go: assist should roll back upright.
-    const top = fly({ pitch: 1 }, Math.PI / CONFIG.PITCH_RATE, true);
+    const top = loopUntil(true, 'top');
     const before = top.up.y;
     fly({}, 2, true, top);
     check('assist: let go upside down → rolls back upright', before < -0.9 && top.up.y > 0.95, before.toFixed(2) + ' → ' + top.up.y.toFixed(2));
   }
   const ex = fly({ roll: 1 }, 0.3, false);
   check('expert: roll right drops the right wing', ex.right.y < -0.5);
-  const loop = fly({ pitch: 1 }, 2 * Math.PI / CONFIG.PITCH_RATE, false);
-  check('expert: full pull loops back to level', Math.abs(loop.fwd.y) < 0.05 && loop.fwd.z < -0.99);
+  const loop = loopUntil(false, 'round');
+  check('expert: full pull loops back to level', Math.abs(loop.fwd.y) < 0.05 && loop.fwd.z < -0.99 && loop.t < 10, loop.t.toFixed(1) + ' s');
   // The stick's default is RATE: holding it over keeps rolling (an aileron roll), it doesn't
   // stop at a bank angle the way assist does.
   {
@@ -616,6 +628,88 @@ function fly(ctrl, secs, assist, plane) {
   const dive = X.createPlane(X.v3(0, 300, 0));
   for (let i = 0; i < 600 && !dive.crashed; i++) X.flightStep(dive, { roll: 0, pitch: -1, yaw: 0, throttle: 1 }, 1 / 60, true);
   check('diving into the ground crashes', dive.crashed);
+}
+
+console.log('energy, slip, G');
+{
+  const peak = X.pitchEnvelope(CONFIG.CORNER_SPEED);
+  check('pull rate peaks at corner speed', peak === 1 && X.pitchEnvelope(100) < 0.7 && X.pitchEnvelope(300) < 0.6,
+    X.pitchEnvelope(100).toFixed(2) + ' / 1 / ' + X.pitchEnvelope(300).toFixed(2));
+  // Sustained full pull from cruise: G near 8-9, speed bleeds, the flight path slips outside the nose.
+  const q = X.createPlane(X.v3(0, 3000, 0));
+  let maxG = 0, maxSlip = 0;
+  for (let i = 0; i < 60 * 0.6; i++) { X.flightStep(q, { roll: 0, pitch: 1, yaw: 0, throttle: 0.5 }, 1 / 60, false); maxG = Math.max(maxG, q.g); maxSlip = Math.max(maxSlip, q.slip); }
+  check('a full pull at cruise reads ~8-9 G', maxG > 7.5 && maxG < 10, maxG.toFixed(1) + ' G');
+  check('…and slips a few degrees (flight path outside the nose)', maxSlip > 4 * DEG && maxSlip < 12 * DEG, (maxSlip / DEG).toFixed(1) + '°');
+  check('level flight reads 1 G with no slip', Math.abs(fly({}, 2).g - 1) < 0.01 && fly({}, 2).slip < 1e-6);
+  // A level turn at half throttle bleeds speed; letting go recovers it.
+  const t = X.createPlane(X.v3(0, 3000, 0));
+  for (let i = 0; i < 60 * 8; i++) {
+    const roll = Math.max(-1, Math.min(1, (75 * DEG - X.bankAngle(t)) * 2));
+    X.flightStep(t, { roll, pitch: 0.8, yaw: 0, throttle: 0.5 }, 1 / 60, false);
+  }
+  check('a long hard turn at half throttle bleeds speed', t.speed < 150, t.speed.toFixed(0) + ' m/s');
+  const zoom = X.createPlane(X.v3(0, 1500, 0));
+  zoom.fwd = X.v3(0, 1, 0); zoom.up = X.v3(0, 0, 1); zoom.right = X.v3(1, 0, 0); zoom.path = X.v3(0, 1, 0);
+  zoom.right = X.vCross(zoom.fwd, zoom.up);
+  for (let i = 0; i < 60 * 12; i++) X.flightStep(zoom, { roll: 0, pitch: 0, yaw: 0, throttle: 0.2 }, 1 / 60, false);
+  check('straight up at low throttle runs out of speed and the nose falls (stall)', zoom.fwd.y < 0.9 && zoom.pos.y > 1500, 'nose ' + zoom.fwd.y.toFixed(2) + ', ' + zoom.speed.toFixed(0) + ' m/s');
+  const dive = X.createPlane(X.v3(0, 3500, 0));
+  dive.fwd = X.v3(0, -0.7071, -0.7071); dive.up = X.v3(0, 0.7071, -0.7071); dive.path = { ...dive.fwd };
+  for (let i = 0; i < 60 * 4; i++) X.flightStep(dive, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5 }, 1 / 60, false);
+  check('diving gains speed past the throttle setting', dive.speed > 230, dive.speed.toFixed(0) + ' m/s');
+  // G strain is looks only: it builds under sustained G and never cuts the pull.
+  const s9 = X.createPlane(X.v3(0, 3000, 0));
+  let worstRate = Infinity;
+  for (let i = 0; i < 60 * 12; i++) {
+    const before = { ...s9.fwd };
+    X.flightStep(s9, { roll: 0, pitch: 1, yaw: 0, throttle: 1 }, 1 / 60, false);
+    if (i > 60) worstRate = Math.min(worstRate, Math.acos(Math.min(1, X.vDot(before, s9.fwd))) * 60);
+  }
+  check('sustained full pull builds G strain (tunnel vision)', s9.strain > 0.5, s9.strain.toFixed(2));
+  check('…but never takes the stick away (the nose keeps coming round)', worstRate > 0.6, worstRate.toFixed(2) + ' rad/s worst');
+  for (let i = 0; i < 60 * 4; i++) X.flightStep(s9, { roll: 0, pitch: 0, yaw: 0, throttle: 1 }, 1 / 60, false);
+  check('…and it clears once you ease off', s9.strain < 0.1, s9.strain.toFixed(2));
+}
+
+console.log('dogfight');
+{
+  const ctrl0 = { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: false, missile: false, assist: false };
+  const g = X.createGame(3, 'dogfight');
+  check('dogfight mode has no drones or rings', g.drones.length === 0 && !g.ring);
+  for (let i = 0; i < 120; i++) X.gameUpdate(g, ctrl0, 1 / 60);
+  check('a bandit arrives ahead of you', g.bandits.length === 1 && g.wave === 1 && X.vDot(X.vSub(g.bandits[0].pos, g.plane.pos), g.plane.fwd) > 0);
+  check('waves go rookie → regular → ace', X.SKILLS[g.bandits[0].skill].name === 'ROOKIE');
+  // Park the bandit dead ahead and shoot it.
+  const b = g.bandits[0];
+  b.plane.pos = X.v3(g.plane.pos.x, g.plane.pos.y, g.plane.pos.z - 250);
+  b.plane.fwd = X.v3(0, 0, -1); b.plane.up = X.v3(0, 1, 0); b.plane.right = X.v3(1, 0, 0); b.plane.path = X.v3(0, 0, -1);
+  b.plane.speed = g.plane.speed;
+  let hits = 0;
+  for (let i = 0; i < 40; i++) { X.gameUpdate(g, { ...ctrl0, gun: true }, 1 / 60); hits += g.events.filter(e => e.type === 'hit').length; }
+  check('your rounds hit a bandit', hits > 0, hits + ' hits');
+  // Its rounds hurt you; enough of them shoot you down.
+  const g2 = X.createGame(4, 'dogfight');
+  const hp0 = g2.hp;
+  for (let i = 0; i < 25; i++) g2.bullets.push({ pos: X.v3(g2.plane.pos.x, g2.plane.pos.y, g2.plane.pos.z - 8), vel: X.v3(0, 0, 900), age: 0, owner: 99 });
+  X.gameUpdate(g2, ctrl0, 1 / 60);
+  check('bandit rounds hurt you', g2.hp < hp0, hp0 + ' → ' + g2.hp);
+  check('…and 20 of them shoot you down', g2.plane.crashed && g2.plane.shotDown);
+  X.gameUpdate(g2, ctrl0, 1 / 60);
+  check('…which counts as shot down, not a crash', g2.deaths === 1 && g2.crashes === 0);
+  for (let i = 0; i < 60 * CONFIG.RESPAWN_TIME + 2; i++) X.gameUpdate(g2, ctrl0, 1 / 60);
+  check('respawn with full HP', !g2.plane.crashed && g2.hp === CONFIG.PLAYER_HP);
+  // Missile warning shows distance; your own rounds never hurt you.
+  const g3 = X.createGame(5, 'dogfight');
+  g3.waveT = 999;
+  g3.missiles.push({ pos: X.v3(g3.plane.pos.x, g3.plane.pos.y, g3.plane.pos.z + 2000), dir: X.v3(0, 0, -1), speed: 400, target: g3.player, age: 0, owner: 99, turn: CONFIG.ENEMY_MISSILE_TURN });
+  X.gameUpdate(g3, ctrl0, 1 / 60);
+  check('an enemy missile raises MISSILE with its distance', g3.warn.missile && Math.abs(g3.warn.missile.dist - 2000) < 20);
+  const g4 = X.createGame(6, 'dogfight');
+  g4.waveT = 999;
+  for (let i = 0; i < 60; i++) X.gameUpdate(g4, { ...ctrl0, gun: true }, 1 / 60);
+  check('your own rounds never hurt you', g4.hp === CONFIG.PLAYER_HP);
+  check('range mode still has drones and rings', X.createGame(7).drones.length > 0 && !!X.createGame(7).ring);
 }
 
 console.log('game');

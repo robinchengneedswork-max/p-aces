@@ -35,10 +35,14 @@ function drawHud(ctx, W, H, st) {
       ctx.moveTo(pip.x, pip.y - 24); ctx.lineTo(pip.x, pip.y - 14);
       ctx.stroke();
     }
+    drawFlightPath(ctx, W, H, st);
     drawTargets(ctx, W, H, st);
+    drawBandits(ctx, W, H, st);
     drawRingMarker(ctx, W, H, st);
     drawGauges(ctx, W, H, st);
   }
+  drawTunnel(ctx, W, H, st);
+  if (!p.crashed) drawThreats(ctx, W, H, st);
 
   drawInputs(ctx, W, H, st);
   if (st.camera && st.head) drawLook(ctx, W, H, st.head.look);
@@ -48,9 +52,21 @@ function drawHud(ctx, W, H, st) {
   ctx.font = '16px ' + HUD.font;
   ctx.fillText('SCORE ' + String(g.score).padStart(6, '0'), 20, 24);
   ctx.font = '13px ' + HUD.font;
-  ctx.fillText('KILLS ' + g.kills + '   RINGS ' + g.rings + '   CRASHES ' + g.crashes, 20, 46);
-  ctx.fillStyle = HUD.dim;
-  ctx.fillText(st.perf, 20, 66);
+  if (g.mode === 'dogfight') {
+    ctx.fillText('DOGFIGHT · WAVE ' + g.wave + '   KILLS ' + g.kills + '   SHOT DOWN ' + g.deaths + '   CRASHES ' + g.crashes, 20, 46);
+    // Your HP.
+    const k = g.hp / CONFIG.PLAYER_HP;
+    ctx.strokeStyle = HUD.green;
+    ctx.strokeRect(20, 56, 160, 8);
+    ctx.fillStyle = k > 0.5 ? HUD.green : k > 0.25 ? HUD.amber : HUD.red;
+    ctx.fillRect(21, 57, 158 * k, 6);
+    ctx.fillStyle = HUD.dim;
+    ctx.fillText(st.perf, 20, 80);
+  } else {
+    ctx.fillText('KILLS ' + g.kills + '   RINGS ' + g.rings + '   CRASHES ' + g.crashes, 20, 46);
+    ctx.fillStyle = HUD.dim;
+    ctx.fillText(st.perf, 20, 66);
+  }
 
   // Flashes ("SPLASH ONE", "RING", …)
   ctx.textAlign = 'center';
@@ -63,7 +79,7 @@ function drawHud(ctx, W, H, st) {
   ctx.globalAlpha = 1;
 
   if (st.recorder) drawRecorder(ctx, W, H, st);
-  else if (p.crashed) bigText(ctx, W, H, 'CRASHED', HUD.red, 'respawning…');
+  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : 'CRASHED', HUD.red, 'respawning…');
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
   else if (st.warn) {
@@ -77,7 +93,7 @@ function drawHud(ctx, W, H, st) {
     ctx.textAlign = 'left';
     ctx.font = '12px ' + HUD.font;
     ctx.fillStyle = HUD.dim;
-    ctx.fillText('V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
+    ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
   }
 }
 
@@ -219,6 +235,122 @@ function drawTargets(ctx, W, H, st) {
   ctx.lineWidth = 1.5;
 }
 
+// Flight-path marker: where the plane is actually going. In a hard pull it sits outside the nose
+// (the gun pipper): that gap is the slip.
+function drawFlightPath(ctx, W, H, st) {
+  const p = st.game.plane;
+  const s = projectToScreen(st.world, vAdd(p.pos, vScale(p.path, 700)), W, H);
+  if (!s.on) return;
+  ctx.strokeStyle = HUD.cyan;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+  ctx.moveTo(s.x - 19, s.y); ctx.lineTo(s.x - 7, s.y);
+  ctx.moveTo(s.x + 7, s.y); ctx.lineTo(s.x + 19, s.y);
+  ctx.moveTo(s.x, s.y - 7); ctx.lineTo(s.x, s.y - 14);
+  ctx.stroke();
+}
+
+// Bandits: a red diamond, name + health, and an edge arrow when off screen.
+function drawBandits(ctx, W, H, st) {
+  const g = st.game, w = st.world;
+  for (const b of g.bandits) {
+    const s = projectToScreen(w, b.pos, W, H);
+    const dist = vDist(b.pos, g.plane.pos);
+    if (!s.on) { edgeArrow(ctx, W, H, s, HUD.red); continue; }
+    const isTarget = g.lock.target === b, locked = isTarget && g.lock.locked;
+    const r = 16;
+    ctx.strokeStyle = HUD.red;
+    ctx.lineWidth = locked ? 3 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - r); ctx.lineTo(s.x + r, s.y); ctx.lineTo(s.x, s.y + r); ctx.lineTo(s.x - r, s.y); ctx.closePath();
+    ctx.stroke();
+    if (isTarget && !locked) {
+      const R = r + 8 + (1 - g.lock.time / CONFIG.LOCK_TIME) * 50;
+      ctx.strokeRect(s.x - R, s.y - R, R * 2, R * 2);
+    } else if (locked) ctx.strokeRect(s.x - r - 6, s.y - r - 6, (r + 6) * 2, (r + 6) * 2);
+    ctx.fillStyle = HUD.red;
+    ctx.font = '11px ' + HUD.font;
+    ctx.textAlign = 'left';
+    ctx.fillText((locked ? 'LOCK ' : '') + SKILLS[b.skill].name + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
+    ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / b.maxHp), 3);
+  }
+  ctx.lineWidth = 1.5;
+}
+
+// Off-screen marker: an arrow on a circle round the middle, pointing toward it.
+function edgeArrow(ctx, W, H, s, color) {
+  let dx = s.x - W / 2, dy = s.y - H / 2;
+  if (s.behind) { dx = -dx; dy = -dy; }
+  const a = Math.atan2(dy, dx);
+  const R = Math.min(W, H) * 0.38;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.translate(W / 2 + Math.cos(a) * R, H / 2 + Math.sin(a) * R);
+  ctx.rotate(a);
+  ctx.beginPath();
+  ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// LOCK WARNING while a bandit holds you in its seeker; MISSILE + distance once one is coming, and
+// BREAK once a full pull now will beat it (CONFIG.BREAK_DIST).
+function drawThreats(ctx, W, H, st) {
+  const g = st.game, m = g.warn.missile;
+  const blink = Math.floor(st.now * 6) % 2 === 0;
+  ctx.textAlign = 'center';
+  if (m) {
+    const [lo, hi] = CONFIG.BREAK_DIST;
+    const brk = m.dist <= hi && m.dist >= lo * 0.6;
+    ctx.fillStyle = HUD.red;
+    ctx.font = 'bold 22px ' + HUD.font;
+    if (blink || brk) ctx.fillText('MISSILE ' + Math.round(m.dist) + 'm', W / 2, H * 0.16);
+    if (brk) {
+      ctx.font = 'bold 34px ' + HUD.font;
+      ctx.fillText('BREAK!  PULL HARD', W / 2, H * 0.22);
+    }
+    const s = projectToScreen(st.world, m.pos, W, H);
+    if (s.on) {
+      ctx.strokeStyle = HUD.red;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 10, 0, Math.PI * 2);
+      ctx.stroke();
+    } else edgeArrow(ctx, W, H, s, HUD.red);
+  } else if (g.warn.lock && blink) {
+    ctx.fillStyle = HUD.amber;
+    ctx.font = 'bold 20px ' + HUD.font;
+    ctx.fillText('LOCK WARNING', W / 2, H * 0.16);
+  }
+}
+
+// Sustained high G: the edges of the view grey out and close in (tunnel vision); hard negative G
+// tints it red; taking hits flashes red. Looks only: it never touches the controls.
+function drawTunnel(ctx, W, H, st) {
+  const p = st.game.plane;
+  const k = clamp((p.strain - 0.15) / 0.85, 0, 1);
+  const diag = Math.hypot(W, H) / 2;
+  if (k > 0) {
+    const inner = diag * (0.95 - 0.7 * k);
+    const grad = ctx.createRadialGradient(W / 2, H / 2, inner, W / 2, H / 2, diag);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(Math.min(1, 0.35 + 0.3 * k), 'rgba(0,0,0,' + (0.5 + 0.35 * k).toFixed(3) + ')');
+    grad.addColorStop(1, 'rgba(0,0,0,' + (0.7 + 0.25 * k).toFixed(3) + ')');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    // Greying out: the picture loses colour as it closes in.
+    if (k > 0.6) { ctx.fillStyle = 'rgba(40,40,40,' + ((k - 0.6) * 0.5).toFixed(3) + ')'; ctx.fillRect(0, 0, W, H); }
+  }
+  const red = Math.max(p.red * 0.45, st.hurt || 0);
+  if (red > 0) {
+    const grad = ctx.createRadialGradient(W / 2, H / 2, diag * 0.4, W / 2, H / 2, diag);
+    grad.addColorStop(0, 'rgba(160,0,0,0)');
+    grad.addColorStop(1, 'rgba(160,0,0,' + red.toFixed(3) + ')');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
 function drawRingMarker(ctx, W, H, st) {
   const g = st.game;
   if (!g.ring) return;
@@ -235,19 +367,7 @@ function drawRingMarker(ctx, W, H, st) {
     ctx.fillText('RING ' + Math.round(dist) + 'm', s.x, s.y + 16);
     return;
   }
-  // Off-screen: an arrow on the edge pointing toward it.
-  let dx = s.x - W / 2, dy = s.y - H / 2;
-  if (s.behind) { dx = -dx; dy = -dy; }
-  const a = Math.atan2(dy, dx);
-  const R = Math.min(W, H) * 0.38;
-  const x = W / 2 + Math.cos(a) * R, y = H / 2 + Math.sin(a) * R;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(a);
-  ctx.beginPath();
-  ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  edgeArrow(ctx, W, H, s, HUD.amber);
 }
 
 function drawGauges(ctx, W, H, st) {
@@ -266,6 +386,17 @@ function drawGauges(ctx, W, H, st) {
   };
   box(W * 0.2, 'SPEED', String(Math.round(p.speed * 3.6)));
   box(W * 0.8, 'ALT', String(Math.round(p.pos.y)));
+  // G meter under the speed box: amber past the onset of tunnel vision.
+  ctx.font = 'bold 15px ' + HUD.font;
+  ctx.fillStyle = p.g > CONFIG.G_ONSET || p.g < CONFIG.REDOUT_G ? HUD.amber : HUD.green;
+  ctx.fillText(p.g.toFixed(1) + ' G', W * 0.2, cy + 32);
+  if (p.stall > 0) {
+    ctx.fillStyle = HUD.red;
+    ctx.font = 'bold 18px ' + HUD.font;
+    ctx.fillText('STALL — PUSH + THROTTLE', W / 2, H * 0.62);
+  }
+  ctx.font = 'bold 18px ' + HUD.font;
+  ctx.fillStyle = HUD.green;
   const agl = p.pos.y - groundHeight(p.pos.x, p.pos.z);
   if (agl < 150) {
     ctx.fillStyle = HUD.red;

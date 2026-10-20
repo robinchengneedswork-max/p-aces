@@ -7,7 +7,8 @@ const video = document.getElementById('cam');
 
 let settings = loadSettings();
 let controls = createControls();
-let game = createGame(Date.now() % 100000);
+// ?dogfight starts in dogfight mode (B toggles in game).
+let game = createGame(Date.now() % 100000, new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range');
 let world = null;
 let mode = 'camera';         // 'camera' | 'keyboard'
 let debug = true;
@@ -19,6 +20,7 @@ let recorder = null;          // gesture recording in progress (G)
 let calib = null;            // { left } seconds of countdown
 let flashes = [];
 let missileFlash = 0;
+let hurtFlash = 0, warnT = 0;   // red edge flash when hit; time to the next warning tone
 let lockTickT = 0;
 let drawAcc = 0;               // anime look: time banked toward the next 24 fps picture
 let sinceDraw = 0;             // time since the last picture (what the renderer animates by)
@@ -222,7 +224,16 @@ function frame(ts) {
   for (const e of game.events) {
     if (e.type === 'gun') SFX.gun();
     if (e.type === 'missile') { SFX.missile(); missileFlash = 0.4; }
-    if (e.type === 'kill') { SFX.kill(); flash('SPLASH ONE', HUD.green); }
+    if (e.type === 'kill') {
+      SFX.kill();
+      flash(e.bandit ? (e.how === 'crashed' ? SKILLS[e.skill].name + ' FLEW INTO THE GROUND' : 'SPLASH ONE — ' + SKILLS[e.skill].name + ' DOWN') : 'SPLASH ONE', HUD.green);
+    }
+    if (e.type === 'bandit') flash('BANDIT — ' + SKILLS[e.skill].name, HUD.red);
+    if (e.type === 'hit') SFX.hit();
+    if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.6, hurtFlash + 0.25); }
+    if (e.type === 'enemy-missile') SFX.enemyLaunch();
+    if (e.type === 'enemy-gun') SFX.enemyGun();
+    if (e.type === 'shot-down') SFX.crash();
     if (e.type === 'boom') SFX.boom();
     if (e.type === 'crash') SFX.crash();
     if (e.type === 'ring') { SFX.ring(); flash('RING +50', HUD.amber); }
@@ -234,6 +245,14 @@ function frame(ts) {
     if (lockTickT <= 0) { SFX.lockTick(); lockTickT = 0.12; }
   }
   missileFlash = Math.max(0, missileFlash - dt);
+  hurtFlash = Math.max(0, hurtFlash - dt * 1.5);
+  // Warning tones: a slow beep while something locks you, fast and rising as a missile closes.
+  warnT -= dt;
+  if (warnT <= 0 && !game.plane.crashed) {
+    const m = game.warn.missile;
+    if (m) { SFX.warnMissile(m.dist < CONFIG.BREAK_DIST[1]); warnT = clamp(m.dist / 4000, 0.07, 0.3); }
+    else if (game.warn.lock) { SFX.warnLock(); warnT = 0.45; }
+  }
   engineSet((game.plane.speed - CONFIG.SPEED_MIN) / (CONFIG.SPEED_MAX - CONFIG.SPEED_MIN), !game.plane.crashed);
   for (const f of flashes) f.age += dt;
   flashes = flashes.filter(f => f.age < 1.4);
@@ -264,7 +283,7 @@ function frame(ts) {
   else if (camera && !isCalibrated(settings)) warn = 'Press C to calibrate';
   if (draw) drawHud(hctx, W, H, {
     game, world, settings, ctrl: controls, flashes, debug, camera, video, assigned, calib, warn, face, head, recorder, now,
-    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash,
+    throttle: ctrl.throttle, gun: ctrl.gun, missileFlash, hurt: hurtFlash,
     status: camera ? statusLine() : '',
     perf: perfLine(camera),
   });
@@ -384,7 +403,11 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Escape') { calib = null; if (recorder) { recorder = null; flash('RECORDING CANCELLED', HUD.dim); } }
   if (e.code === 'KeyG') startRecording();
   if (e.code === 'KeyV') world.view = world.view === 'chase' ? 'cockpit' : 'chase';
-  if (e.code === 'KeyR') { game = createGame(Date.now() % 100000); flash('RESET', HUD.ink); }
+  if (e.code === 'KeyR') { game = createGame(Date.now() % 100000, game.mode); flash('RESET', HUD.ink); }
+  if (e.code === 'KeyB') {
+    game = createGame(Date.now() % 100000, game.mode === 'range' ? 'dogfight' : 'range');
+    flash(game.mode === 'dogfight' ? 'DOGFIGHT — bandits incoming' : 'TEST RANGE', HUD.ink);
+  }
   if (e.code === 'Digit1' && settings.scheme !== 'flat') toggle('scheme', 'flat', 'stick', () => 'FLAT HAND');
   if (e.code === 'Digit2' && settings.scheme !== 'stick') toggle('scheme', 'flat', 'stick', () => 'FLIGHT STICK');
   if (e.code === 'KeyM') {

@@ -7,10 +7,28 @@ const CONFIG = {
   // Flight
   SPEED_MIN: 90,
   SPEED_MAX: 260,
-  ACCEL: 0.6,                // speed approaches throttle target at this rate (1/s)
-  CLIMB_DRAG: 40,            // m/s² lost per unit of nose-up (gravity, arcade-scaled)
-  ROLL_RATE: 3.2,            // rad/s at full stick (expert)
-  PITCH_RATE: 1.1,           // rad/s at full stick
+  ACCEL: 0.6,                // speed approaches throttle target at this rate (1/s): thrust minus drag
+  CLIMB_DRAG: 55,            // m/s² lost per unit of climb (gravity, arcade-scaled; diving gains it): straight
+                             // up holds ~170 m/s at full throttle, ~80 at half, stalls below ~0.3. 70 made
+                             // a pull-up dodge bleed too fast: side-on missiles hit through a perfect break
+  ROLL_RATE: 3.2,            // rad/s at full stick (rate mode), at ROLL_FULL_SPEED and up
+  ROLL_FULL_SPEED: 130,      // slower than this, the ailerons bite less…
+  ROLL_MIN: 0.6,             // …down to this share of ROLL_RATE
+  PITCH_RATE: 1.2,           // rad/s at full pull, at CORNER_SPEED (the tightest turn)
+  CORNER_SPEED: 170,         // best turning speed. Slower: the wings run out of lift (rate ∝ speed^LOW_EXP);
+  PITCH_LOW_EXP: 0.8,        // faster: the g limit caps it (rate ∝ 1/speed). Throttle 0.5 cruises about here.
+  PUSH_SHARE: 0.7,           // pushing (negative g) gets this share of the pull rate
+  A_PER_G: 26,               // arcade m/s² per displayed g: a full pull at corner speed reads ~9 G
+  TURN_BLEED: 0.85,          // m/s² of speed lost per (G-1)²: hard turns cost energy
+  SLIP_GRIP: 9,              // how fast the flight path follows the nose (1/s) at corner speed: a hard
+                             // pull runs ~7° of slip; slower = more slip (mushier)
+  STALL_SPEED: 70,           // below this the nose drops on its own…
+  STALL_DROP: 0.9,           // …at up to this rate (rad/s), and pulls fade out
+  SPEED_FLOOR: 35,
+  G_ONSET: 6,                // sustained G above this builds strain = tunnel vision. Looks only: it never
+  G_STRAIN_TIME: 14,         // takes the stick (user). Builds at (G - onset) / this per second,
+  G_RECOVER: 0.35,           // drains this much per second below onset
+  REDOUT_G: -2.5,            // pushing past this tints the view red
   YAW_RATE: 0.35,
   MAX_BANK: 75 * DEG,        // assist: full stick = this bank angle
   BANK_GAIN: 4,              // assist: how hard it chases the target bank
@@ -38,7 +56,9 @@ const CONFIG = {
   GUN_SPEED: 900,
   GUN_LIFE: 1.4,
   MISSILE_SPEED: 420,
-  MISSILE_TURN: 2.6,         // rad/s
+  MISSILE_TURN: 1.3,         // rad/s. Missiles chase where you ARE (pure pursuit, no lead): then a hard
+                             // break at the right moment beats one, flying straight never does. Yours
+                             // turn a little harder than theirs (bandits get a narrower dodge window)
   MISSILE_LIFE: 7,
   MISSILE_COOLDOWN: 1.2,
   LOCK_CONE: 20 * DEG,
@@ -51,6 +71,26 @@ const CONFIG = {
   DRONE_MAX_DIST: 6000,
   RING_R: 45,
   RING_AHEAD: 1300,
+
+  // Dogfight (B): one bandit at a time, rookie → regular → ace
+  PLAYER_HP: 100,
+  BANDIT_R: 16,              // gun hit radius on a bandit (generous, like the drones)
+  PLANE_HIT_R: 9,            // …and on you
+  BANDIT_GUN_RATE: 8,        // rounds/s while it has a firing solution
+  BANDIT_GUN_SPREAD: 0.6 * DEG,
+  BANDIT_GUN_DMG: 5,         // HP per round that hits you (20 hits = down)
+  MISSILE_DMG: 10,           // bandit hp per player missile (rookie 8, regular 10, ace 16)
+  ENEMY_MISSILE_DMG: 45,     // your HP per enemy missile
+  ENEMY_MIN_RANGE: 600,      // bandits don't launch closer than this (guns range)
+  ENEMY_LOCK_TIME: 1.6,      // a bandit must hold you in its cone this long to launch (LOCK WARNING meanwhile)
+  ENEMY_MISSILE_TURN: 1.1,   // rad/s (turn radius ~550 m at full speed)
+  BREAK_DIST: [900, 1250],   // a full pull started with the missile this far away (m) beats it from any
+                             // side (swept: behind, beside, head-on). As a TIME it varies 3x by aspect,
+                             // as a distance it doesn't: ~2 missile turn radii. HUD shows BREAK in it.
+  MISSILE_FUSE: 14,          // proximity fuse (m)
+  MISSILE_GIMBAL: 75 * DEG,  // target further off the seeker's nose than this = it loses you
+  BANDIT_SPAWN_DIST: 3500,
+  WAVE_GAP: 3,               // seconds between a splash and the next bandit
 
   // Hands → controls
   HAND_LOST_HOLD: 0.3,       // seconds to hold the last input after a hand vanishes

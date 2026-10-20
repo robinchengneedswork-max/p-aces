@@ -1,4 +1,4 @@
-// render.js — the three.js world: terrain, sea, clouds, plane, drones, ring, tracers, smoke.
+// render.js — the three.js world: terrain, sea, clouds, plane, bandits, drones, ring, tracers, smoke.
 // Reads game state, never writes it. Flight maths uses {x,y,z}; THREE objects stay in here.
 
 const SKY = 0x8fc3e8;
@@ -20,7 +20,7 @@ function createWorld(canvas, pixelRatio) {
   scene.add(sun);
 
   const w = { renderer, scene, camera, terrain: makeTerrain(), sea: makeSea(), clouds: makeClouds(), plane: makePlaneModel(), cockpit: makeCockpit(),
-    drones: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
+    drones: new Map(), bandits: new Map(), ring: makeRing(), tracers: makeTracers(), smoke: makeSmoke(), booms: [], missiles: [],
     trails: [makeTrail(), makeTrail()], prevFwd: null, vapor: 0,
     terrainCenter: null, heightCache: new Map(), camUp: new THREE.Vector3(0, 1, 0), camPos: null, view: 'chase' };
   scene.add(w.terrain, w.sea, w.clouds.mesh, w.clouds.ink, w.plane, w.ring, w.tracers, w.smoke.points, w.trails[0].mesh, w.trails[1].mesh);
@@ -126,10 +126,11 @@ function placeCloud(clouds, i) {
 }
 
 // A little delta-wing jet pointing down -z, like every THREE object.
-function makePlaneModel() {
+// paint: { body, dark } colours. Bandits wear a darker red-grey scheme.
+function makePlaneModel(paint) {
   const g = new THREE.Group();
-  const body = new THREE.MeshPhongMaterial({ color: 0x9aa7b4, flatShading: true });
-  const dark = new THREE.MeshPhongMaterial({ color: 0x4d5864, flatShading: true });
+  const body = new THREE.MeshPhongMaterial({ color: paint ? paint.body : 0x9aa7b4, flatShading: true });
+  const dark = new THREE.MeshPhongMaterial({ color: paint ? paint.dark : 0x4d5864, flatShading: true });
   const fus = new THREE.Mesh(new THREE.ConeGeometry(1.3, 15, 6), body);
   fus.geometry.rotateX(-Math.PI / 2);
   g.add(fus);
@@ -266,6 +267,8 @@ function makeCockpit() {
 
   return { scene, camera, sun, needles, stick, throttle, ext };
 }
+
+const BANDIT_PAINT = { body: 0x8a5a58, dark: 0x3a2426 };
 
 function makeDroneModel() {
   const g = new THREE.Group();
@@ -426,6 +429,18 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   }
   for (const [id, m] of w.drones) if (!alive.has(id)) { w.scene.remove(m); w.drones.delete(id); }
 
+  // Bandits: same as drones, plane models flown by ai.js.
+  const flying = new Set();
+  for (const b of g.bandits || []) {
+    flying.add(b.id);
+    let m = w.bandits.get(b.id);
+    if (!m) { m = makePlaneModel(BANDIT_PAINT); styleNew(w, m); w.bandits.set(b.id, m); w.scene.add(m); }
+    m.position.copy(tv(b.plane.pos));
+    setBasis(m, b.plane.fwd, b.plane.up);
+    m.userData.flame.scale.set(1, 1, 0.4 + b.plane.throttle * 1.2 + Math.random() * 0.15);
+  }
+  for (const [id, m] of w.bandits) if (!flying.has(id)) { w.scene.remove(m); w.bandits.delete(id); }
+
   w.ring.visible = !!g.ring;
   if (g.ring) {
     w.ring.position.copy(tv(g.ring.pos));
@@ -467,7 +482,9 @@ function renderWorld(w, g, dt, now, look, ctrl) {
   S.points.geometry.setDrawRange(0, S.puffs.length);
 
   for (const e of g.events) {
-    if (e.type === 'kill') addBoom(w, e.pos, 40);
+    if (e.type === 'kill') addBoom(w, e.pos, e.bandit ? 60 : 40);
+    if (e.type === 'hit') addBoom(w, e.pos, 6);
+    if (e.type === 'shot-down') addBoom(w, e.pos, 70);
     if (e.type === 'boom') addBoom(w, e.pos, 25);
     if (e.type === 'crash') addBoom(w, e.pos, 70);
   }

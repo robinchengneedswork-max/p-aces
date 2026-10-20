@@ -75,4 +75,10 @@ const SFX = {
   lockTick() { tone(1100, 0.05, 'square', 0.06); },
   locked() { tone(1600, 0.25, 'square', 0.08); },
   calib() { tone(660, 0.15, 'sine', 0.2); },
+  hit() { tone(2400, 0.04, 'square', 0.05); },
+  hurt() { noiseBurst(0.12, 1800, 0.35, 300); },
+  enemyGun() { noiseBurst(0.04, 1500, 0.05); },
+  enemyLaunch() { tone(520, 0.35, 'sawtooth', 0.08, 1040); },
+  warnLock() { tone(880, 0.12, 'square', 0.05); },
+  warnMissile(close) { tone(close ? 1700 : 1300, 0.06, 'square', 0.07); },
 };

@@ -22,6 +22,7 @@ Both laptops get this folder (`git clone` is best — a zipped copy on a Mac may
 - `node test/headless.js` — synthetic hands/faces drive the real control, flight, game and duel code.
 - `node test/dogfight.js report` — AI-vs-AI fights and missile-dodge sweeps.
 - `node test/duel.js` — the duel server end to end with real WebSocket clients.
+- `node test/headless.js` also covers solo escort (`raid.js`) and the hidden WW2 gun assist.
 - `node test/escort.js` — the bomber-escort room (server-flown formation, roles, kills, lives, time) over real sockets.
 - `node test/planes.js report` — WW2 flight models vs rough historical figures (climb, turn, zoom, over-G).
 - `G` in the game records your hand motions; `node tools/analyze-recording.js latest` reports which

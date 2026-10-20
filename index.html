@@ -29,6 +29,15 @@
       countdown to hold your flying hand level, so the game knows what "straight ahead" means.
       Turn your head a little to look around (L turns that off). <b>V</b> switches between chase and cockpit view. Keyboard always works too: arrows fly, W/S throttle, Space guns, F missile.</p>
     <div class="plane-pick">
+      <label for="mode-pick"><b>Mode</b></label>
+      <select id="mode-pick">
+        <option value="range">Test range (drones and rings)</option>
+        <option value="dogfight">Dogfight (AI bandits, one at a time)</option>
+        <option value="raid-109">Bomber escort, solo: fly the Bf 109 against AI P-51 escorts</option>
+        <option value="raid-p51">Bomber escort, solo: fly a P-51 escort against AI 109s</option>
+      </select>
+    </div>
+    <div class="plane-pick">
       <label for="plane-pick"><b>Plane</b></label>
       <select id="plane-pick">
         <option value="jet">Jet (arcade: lead marker, missiles)</option>
@@ -81,6 +90,7 @@
 <script src="src/game.js"></script>
 <script src="src/duel.js"></script>
 <script src="src/escort.js"></script>
+<script src="src/raid.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>

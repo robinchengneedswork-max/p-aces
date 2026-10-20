@@ -155,12 +155,24 @@ const CONFIG = {
   // Escort (bomber escort over the LAN, duel-server.js escort room): one 109 against a formation
   // and its P-51 escorts. The server flies the bombers and their gunners (who shoot only at the 109).
   FORMATION: [[0, 0, 0], [-85, 70, 25], [85, 70, 25], [0, 150, -30], [-170, 150, -10], [170, 150, -10]],
+  FORMATION_SPEED: 100,      // m/s: a loaded formation is slower than a lone target bomber (BOMBER_SPEED)
   ESCORT_ALT: 6000,          // formation height above the ground at the start
   ESCORT_KILLS: 3,           // bombers the 109 must bring down
   ESCORT_LIVES: 3,           // times the escorts must shoot the 109 down
   ESCORT_TIME: 300,          // s: then the bombers reach the target (escorts win)
   ESCORT_RESPAWN: 5,         // s before you're back in (the 109 high above, escorts by the formation)
   ESCORT_SEND_HZ: 20,        // bomber states from the server
+  // Solo escort (raid.js): AI pilots for the other side.
+  RAID_ESCORTS: 3,           // AI P-51s with the bombers when you fly the 109 (a regular + rookies)
+  RAID_109S: 6,              // AI 109s you must get through when you fly escort…
+  RAID_109_AT_ONCE: 3,       // …this many in the air at a time
+  RAID_GAP: 12,              // s before a downed AI pilot is replaced
+  RAID_FIRE_RANGE: 1.5,      // an AI pilot opens fire on a bomber from this × its usual gun range
+  RAID_BREAK: 150,           // m: an AI 109 breaks off its pass this close to a bomber…
+  RAID_PASS: 4,              // …or after this long in gun range
+  RAID_AWAY: 4,              // s it dives away before coming round again
+  RAID_GUNNER_VS_AI: 0.5,    // the gunners' rounds on an AI 109 (they'd shred a pilot who flies it like a bot)
+  RAID_ENGAGE: 3500,         // m: AI escorts leave the bombers once the 109 is this close to them
 
   // Duel (two laptops, duel-server.js): same guns and missiles as a bandit fight, both sides equal
   DUEL_ROUND_TIME: 180,      // s: a round nobody wins by then is a draw (WW2 ammo runs out; keep in step with duel-server.js)

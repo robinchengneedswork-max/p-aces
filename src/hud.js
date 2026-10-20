@@ -58,8 +58,9 @@ function drawHud(ctx, W, H, st) {
   ctx.font = '16px ' + HUD.font;
   ctx.fillText('SCORE ' + String(g.score).padStart(6, '0'), 20, 24);
   ctx.font = '13px ' + HUD.font;
-  if (g.mode === 'duel' || g.mode === 'dogfight') {
-    if (g.mode === 'duel') ctx.fillText('DUEL · ROUND ' + (st.duel ? st.duel.round : 0) + '   first to ' + (st.duel ? st.duel.target : 5), 20, 46);
+  if (g.mode === 'duel' || g.mode === 'dogfight' || g.mode === 'escort') {
+    if (g.mode === 'escort') ctx.fillText('BOMBER ESCORT' + (g.solo ? ' (SOLO)' : '') + ' · KILLS ' + g.kills + '   SHOT DOWN ' + g.deaths + '   CRASHES ' + g.crashes, 20, 46);
+    else if (g.mode === 'duel') ctx.fillText('DUEL · ROUND ' + (st.duel ? st.duel.round : 0) + '   first to ' + (st.duel ? st.duel.target : 5), 20, 46);
     else ctx.fillText('DOGFIGHT · WAVE ' + g.wave + '   KILLS ' + g.kills + '   SHOT DOWN ' + g.deaths + '   CRASHES ' + g.crashes, 20, 46);
     // Your HP.
     const k = g.hp / CONFIG.PLAYER_HP;
@@ -85,6 +86,7 @@ function drawHud(ctx, W, H, st) {
   });
   ctx.globalAlpha = 1;
   if (st.duel) drawDuelScore(ctx, W, H, st);
+  else if (g.solo) drawEscortStatus(ctx, W, H, g, g.solo, g.solo.over ? null : g.respawnT);
 
   if (st.recorder) drawRecorder(ctx, W, H, st);
   // Calibration first: in a duel the loser's plane is still down when the next round's calibration
@@ -93,7 +95,12 @@ function drawHud(ctx, W, H, st) {
   else if (st.calib) bigText(ctx, W, H, String(Math.ceil(st.calib.left)), HUD.amber,
     (st.settings.scheme === 'stick' ? 'Hold the stick centred, left hand at rest, and look at the screen' : 'Hold your flying hand level and look at the screen — this is "straight ahead"') + '   (paused)');
   else if (st.duel && duelOverlay(ctx, W, H, st)) { /* duel screen drawn */ }
-  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : p.wingFailed ? 'WING FAILURE' : 'CRASHED', HUD.red, g.mode === 'duel' ? '' : 'respawning…');
+  else if (g.solo && g.solo.over) {
+    const o = g.solo.over, won = o.winner === g.team;
+    bigText(ctx, W, H, (o.winner === 'attacker' ? 'THE 109 WINS' : 'THE ESCORTS WIN') + (won ? ' — YOU WIN' : ''), won ? HUD.green : HUD.red,
+      (o.why === 'bombers' ? g.solo.need + ' bombers down' : o.why === 'time' ? 'the bombers reached the target' : 'the 109s are out of the fight') + ' · R to fly it again');
+  }
+  else if (p.crashed) bigText(ctx, W, H, p.shotDown ? 'SHOT DOWN' : p.wingFailed ? 'WING FAILURE' : 'CRASHED', HUD.red, g.mode === 'duel' || g.solo ? '' : 'respawning…');
   else if (st.warn) {
     ctx.fillStyle = HUD.amber;
     ctx.font = 'bold 18px ' + HUD.font;
@@ -105,7 +112,8 @@ function drawHud(ctx, W, H, st) {
     ctx.textAlign = 'left';
     ctx.font = '12px ' + HUD.font;
     ctx.fillStyle = HUD.dim;
-    ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · N bomber · K plane (' + p.spec.name + ') · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
+    if (g.solo) ctx.fillText('R new mission · B test range · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate', 20, H - 20);
+    else ctx.fillText('B ' + (g.mode === 'range' ? 'dogfight' : 'range') + ' · N bomber · K plane (' + p.spec.name + ') · U ' + (minimal ? 'full' : 'minimal') + ' HUD · V ' + (st.world.view === 'chase' ? 'cockpit' : 'chase') + ' view · D tuning · C or clap twice to calibrate' + (st.camera ? ' · G record gestures' : ''), 20, H - 20);
   }
 }
 
@@ -299,7 +307,7 @@ function drawFlightPath(ctx, W, H, st) {
 // Dim = out of gun range, green = in range, filled = close enough that the gun assist takes over.
 function drawLead(ctx, W, H, st) {
   const g = st.game, p = g.plane, sol = g.gunSol;
-  if (!sol) return;
+  if (!sol || p.spec.LEAD === false) return;   // WW2: no marker (the assist still works, see the sight)
   const s = projectToScreen(st.world, vAdd(p.pos, vScale(sol.dir, 700)), W, H);
   const t = projectToScreen(st.world, sol.target.pos, W, H);
   if (!s.on) return;
@@ -347,7 +355,7 @@ function drawBandits(ctx, W, H, st) {
     ctx.fillStyle = col;
     ctx.font = '11px ' + HUD.font;
     ctx.textAlign = 'left';
-    const label = b.kind === 'remote' ? b.name.toUpperCase() + (b.team ? (b.team === 'attacker' ? ' (109)' : ' (P-51)') : '') : b.kind === 'bomber' ? 'BOMBER' : SKILLS[b.skill].name;
+    const label = b.kind === 'remote' ? b.name.toUpperCase() + (b.team ? (b.team === 'attacker' ? ' (109)' : ' (P-51)') : '') : b.kind === 'bomber' ? 'BOMBER' : (b.team ? (b.team === 'attacker' ? '109 ' : 'P-51 ') : '') + SKILLS[b.skill].name;
     ctx.fillText((locked ? 'LOCK ' : '') + label + ' ' + (dist / 1000).toFixed(1) + 'km', s.x + r + 6, s.y - 6);
     ctx.fillRect(s.x + r + 6, s.y + 4, 40 * Math.max(0, b.hp / (b.maxHp || CONFIG.PLAYER_HP)), 3);
   }
@@ -359,28 +367,32 @@ function drawDuelScore(ctx, W, H, st) {
   const d = st.duel, me = duelMe(d), op = duelOpponent(d);
   if (!me) return;
   if (d.mode === 'escort') {
-    // Mission status: bombers down, the 109's lives, time to the target, your role.
-    const m = d.mission, g = st.game;
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 18px ' + HUD.font;
-    ctx.fillStyle = HUD.green;
-    if (m) {
-      const left = Math.max(0, m.left), t = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-      ctx.fillText('BOMBERS DOWN ' + m.kills + '/' + m.need + '   ·   109 LIVES ' + '▮'.repeat(Math.max(0, m.lives)) + '▯'.repeat(Math.max(0, m.livesMax - m.lives)) + '   ·   TARGET IN ' + t, W / 2, 70);
-    }
-    ctx.font = 'bold 14px ' + HUD.font;
-    ctx.fillStyle = g.team === 'attacker' ? HUD.red : HUD.cyan;
-    if (g.team) ctx.fillText(g.team === 'attacker' ? 'YOU: BF 109 — down the bombers' : 'YOU: P-51 ESCORT — protect the bombers', W / 2, 92);
-    if (g.plane.crashed && d.phase === 'fight') {
-      const back = Math.max(0, CONFIG.ESCORT_RESPAWN - (d.respawnT || 0));
-      ctx.fillText(g.team === 'attacker' && m && m.lives <= 0 ? '' : 'BACK IN ' + Math.ceil(back), W / 2, H * 0.36);
-    }
+    drawEscortStatus(ctx, W, H, st.game, d.mission, d.phase === 'fight' ? d.respawnT || 0 : null);
     return;
   }
   ctx.textAlign = 'center';
   ctx.font = 'bold 20px ' + HUD.font;
   ctx.fillStyle = HUD.green;
   ctx.fillText(me.name.toUpperCase() + '  ' + me.score + ' — ' + (op ? op.score : 0) + '  ' + (op ? op.name.toUpperCase() : '…'), W / 2, 70);
+}
+
+// Escort mission status (LAN or solo): bombers down, the 109's lives, time to the target, your
+// role, and while you're down how long until you're back (back = time down so far, null = not shown).
+function drawEscortStatus(ctx, W, H, g, m, back) {
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 18px ' + HUD.font;
+  ctx.fillStyle = HUD.green;
+  if (m) {
+    const left = Math.max(0, Math.ceil(m.left)), t = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    ctx.fillText('BOMBERS DOWN ' + m.kills + '/' + m.need + '   ·   ' + (m.livesLabel || '109 LIVES') + ' ' + '▮'.repeat(Math.max(0, m.lives)) + '▯'.repeat(Math.max(0, m.livesMax - m.lives)) + '   ·   TARGET IN ' + t, W / 2, 70);
+  }
+  ctx.font = 'bold 14px ' + HUD.font;
+  ctx.fillStyle = g.team === 'attacker' ? HUD.red : HUD.cyan;
+  if (g.team) ctx.fillText(g.team === 'attacker' ? 'YOU: BF 109 — down the bombers' : 'YOU: P-51 ESCORT — protect the bombers', W / 2, 92);
+  if (g.plane.crashed && back !== null) {
+    const left = Math.max(0, CONFIG.ESCORT_RESPAWN - back);
+    ctx.fillText(g.team === 'attacker' && m && m.lives <= 0 ? '' : 'BACK IN ' + Math.ceil(left), W / 2, H * 0.36);
+  }
 }
 
 // Duel screens between the fighting: connecting, waiting, ready, countdown, round/match result.
@@ -608,6 +620,13 @@ function drawReflector(ctx, W, H, st) {
   ctx.moveTo(c.x + r * 0.25, c.y); ctx.lineTo(c.x + r * 1.5, c.y);
   ctx.moveTo(c.x, c.y + r * 0.25); ctx.lineTo(c.x, c.y + r * 1.3);
   ctx.stroke();
+  // The hidden assist has it: the centre dot swells green (fire now).
+  if (st.game.gunAssisted) {
+    ctx.fillStyle = HUD.green;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 // Minimal HUD: no markers, but a plane too far to be more than a speck still shows as one (like

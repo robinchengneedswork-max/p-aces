@@ -45,7 +45,9 @@ function steerTo(p, point, maxPull) {
   // Roll error to put the point straight "up" from the nose. Close to the nose, fine aim uses a
   // little roll + rudder instead of rolling 90° for a sideways nudge.
   let rollErr = Math.atan2(lx, ly);
-  if (ly < 0 && off < 15 * DEG) rollErr = -Math.atan2(lx, -ly);   // just below the nose: push, don't roll over
+  // Just below the nose: push, don't roll over. Not while inverted, though (diving in on a bomber):
+  // a push is weak, and the nose would hang a few degrees off the target for the whole pass.
+  if (ly < 0 && off < 15 * DEG && (p.up.y > -0.2 || off < 2 * DEG)) rollErr = -Math.atan2(lx, -ly);
   const roll = clamp(rollErr * 2.5, -1, 1) * clamp(off / (6 * DEG), 0, 1);
   const aligned = Math.abs(rollErr) < 50 * DEG || off < 15 * DEG;
   const pitch = clamp(Math.atan2(ly, Math.max(lz, 0.05)) * 4, -0.5, maxPull) * (aligned ? 1 : 0.25);
@@ -70,7 +72,7 @@ function groundDanger(p, soon) {
   return soon && p.pos.y - groundHeight(p.pos.x, p.pos.z) < 150 && p.path.y < 0.1;
 }
 
-// One pilot decision. target = { pos, vel, plane? }, threats = [{ ref, pos, tti, dist }] missiles coming for us.
+// One pilot decision. target = { pos, vel, plane?, bomber? }, threats = [{ ref, pos, tti, dist }] missiles coming for us.
 // Returns ctrl plus { fire, lockOn } wishes; the game decides what actually happens.
 function pilotStep(b, target, threats, dt) {
   const p = b.plane, P = b.pilot, sk = SKILLS[b.skill];
@@ -89,7 +91,7 @@ function pilotStep(b, target, threats, dt) {
   if (target && (P.think <= 0 || !P.seen)) {
     P.think = sk.react * (0.7 + rng() * 0.6);
     P.seen = { pos: { ...target.pos }, vel: { ...target.vel }, age: 0 };
-    const e = sk.aim;
+    const e = sk.aim * (target.bomber ? 0.4 : 1);   // a bomber flies straight: easy to hold
     P.aim = v3((rng() - 0.5) * 2 * e, (rng() - 0.5) * 2 * e, 0);
   }
   if (!target) P.seen = null;          // you're dead (or gone): forget you, patrol
@@ -149,8 +151,17 @@ function pilotStep(b, target, threats, dt) {
   } else if (tp) {
     // Attack: lead pursuit — aim where the target will be when the rounds get there.
     P.mode = 'attack';
-    const tof = dist / ((p.spec.GUNS ? p.spec.GUNS[0].speed : CONFIG.GUN_SPEED) + p.speed);
-    const lead = vAdd(tp, vScale(P.seen.vel, tof));
+    const gunSpeed = p.spec.GUNS ? p.spec.GUNS[0].speed : CONFIG.GUN_SPEED;
+    const tof = dist / (gunSpeed + p.speed);
+    let lead = vAdd(tp, vScale(P.seen.vel, tof));
+    if (target.bomber) {
+      // A bomber attack is mostly diving and pulling (the path slips off the nose): solve the shot
+      // the way your lead marker does, in our moving frame (rounds carry our velocity).
+      const rel = vSub(P.seen.vel, planeVelocity(p));
+      let aim = toT;
+      for (let i = 0; i < 4; i++) aim = vAdd(toT, vScale(rel, vLen(aim) / gunSpeed));
+      lead = vAdd(p.pos, aim);
+    }
     // Aim error turns the lead point a little.
     let aimDir = vNorm(vSub(lead, p.pos));
     aimDir = vRotate(aimDir, p.up, P.aim.x);
@@ -159,15 +170,24 @@ function pilotStep(b, target, threats, dt) {
     const headOn = !sk.joust && target && target.plane && dist < 1500
       && vDot(target.plane.fwd, vScale(toT, -1 / dist)) > 0.9 && vDot(p.fwd, vScale(toT, 1 / dist)) > 0.7;
     if (headOn) aimDir = vRotate(aimDir, p.up, vDot(toT, p.right) > 0 ? 12 * DEG : -12 * DEG);
-    const s = steerTo(p, vAdd(p.pos, vScale(aimDir, dist)), pullMax);
+    // Against a bomber, steer ahead of the line of sight by how fast it's swinging (a diving pass
+    // sweeps it steadily; steering at it alone lags a few degrees behind the whole way down).
+    let steerDir = aimDir;
+    if (target.bomber && P.lastAim && dt > 0) steerDir = vNorm(vAdd(aimDir, vScale(vSub(aimDir, P.lastAim), 0.6 / dt)));
+    P.lastAim = target.bomber ? aimDir : null;
+    const s = steerTo(p, vAdd(p.pos, vScale(steerDir, dist)), pullMax);
     ctrl = s;
     // Close and closing fast = about to overshoot: throttle back.
     const closing = -vDot(vSub(P.seen.vel, planeVelocity(p)), vScale(toT, 1 / dist));
-    if (dist < 600 && closing > 40) throttle = 0.3;
+    // A bomber (target.bomber) is a slashing pass: keep the speed up, no overshoot worries.
+    if (target.bomber) throttle = 1;
+    else if (dist < 600 && closing > 40) throttle = 0.3;
     else if (dist > 2000) throttle = 1;
-    // Fire inside its cone, or whenever the rounds would pass within ~15 m of the target.
-    fire = !headOn && dist < gunRange && (s.off < sk.gunCone || dist * Math.sin(s.off) < 15);
-    good = fire && dist < gunRange * 0.6 && dist * Math.sin(s.off) < 8;   // cannons: only a sure shot
+    // Fire inside its cone, or whenever the rounds would pass within ~15 m of the target. A bomber
+    // is a far bigger target: open up from further out, with more slack.
+    const range = target.bomber ? gunRange * CONFIG.RAID_FIRE_RANGE : gunRange, slack = target.bomber ? 2 : 1;
+    fire = !headOn && dist < range && (s.off < sk.gunCone * slack || dist * Math.sin(s.off) < 15 * slack);
+    good = fire && (target.bomber ? dist < range * 0.7 : dist < range * 0.6 && dist * Math.sin(s.off) < 8);   // cannons: only a sure shot (any bomber shot in close)
     lockOn = s.off < CONFIG.LOCK_CONE && dist < CONFIG.LOCK_RANGE && dist > CONFIG.ENEMY_MIN_RANGE;
   } else {
     P.mode = 'patrol';

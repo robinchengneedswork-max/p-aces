@@ -7,8 +7,17 @@ const video = document.getElementById('cam');
 
 let settings = loadSettings();
 let controls = createControls();
-// ?dogfight starts in dogfight mode (B toggles in game).
-let game = createGame(Date.now() % 100000, new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range', settings.plane);
+// What to fly on your own (the start screen's Mode): 'range', 'dogfight' (B toggles those two in
+// game), or solo bomber escort 'raid-109' / 'raid-p51' (raid.js). ?dogfight starts in dogfight.
+function newGame(kind) {
+  const seed = Date.now() % 100000;
+  if (kind === 'raid-109' || kind === 'raid-p51') return createRaid(seed, kind === 'raid-109' ? 'attacker' : 'escort');
+  return createGame(seed, kind === 'dogfight' ? 'dogfight' : 'range', settings.plane);
+}
+function gameKind(g) {
+  return g.solo ? (g.solo.role === 'attacker' ? 'raid-109' : 'raid-p51') : g.mode;
+}
+let game = newGame(new URLSearchParams(location.search).has('dogfight') ? 'dogfight' : 'range');
 let world = null;
 let mode = 'camera';         // 'camera' | 'keyboard'
 let debug = true;
@@ -335,6 +344,8 @@ function frame(ts) {
     if (e.type === 'kill') {
       SFX.kill();
       if (e.bomber && game.mode === 'escort') flash(game.team === 'attacker' ? 'BOMBER DOWN' : 'WE LOST A BOMBER', game.team === 'attacker' ? HUD.green : HUD.red);
+      else if (e.bandit && e.how === 'gunner') flash('THE GUNNERS GOT A 109', HUD.green);
+      else if (e.bandit && e.team) flash(e.how === 'crashed' ? (e.team === 'attacker' ? 'A 109' : 'A P-51') + ' FLEW INTO THE GROUND' : 'SPLASH ONE — ' + (e.team === 'attacker' ? '109' : 'P-51') + ' DOWN', HUD.green);
       else if (e.bomber) flash(e.how === 'fire' ? 'BOMBER DOWN — BURNED OUT' : 'SPLASH ONE — BOMBER DOWN', HUD.green);
       else flash(e.bandit ? (e.how === 'crashed' ? SKILLS[e.skill].name + ' FLEW INTO THE GROUND' : 'SPLASH ONE — ' + SKILLS[e.skill].name + ' DOWN') : 'SPLASH ONE', HUD.green);
     }
@@ -342,7 +353,8 @@ function frame(ts) {
     if (e.type === 'engine-fire') { SFX.boom(); flash('ENGINE ON FIRE', HUD.amber); }
     if (e.type === 'bomber-crash') SFX.crash();
     if (e.type === 'gunner-down') flash(e.name + ' GUNNER OUT', HUD.green);
-    if (e.type === 'bandit') flash('BANDIT — ' + SKILLS[e.skill].name, HUD.red);
+    if (e.type === 'bandit') flash((game.solo ? '109 INBOUND — ' : 'BANDIT — ') + SKILLS[e.skill].name, HUD.red);
+    if (e.type === 'raid-over') { SFX.ring(); flash(e.winner === game.team ? 'MISSION WON' : 'MISSION LOST', e.winner === game.team ? HUD.green : HUD.red); }
     if (e.type === 'hit') SFX.hit();
     if (e.type === 'hurt') { SFX.hurt(); hurtFlash = Math.min(0.85, hurtFlash + 0.35); shake = Math.min(1, shake + e.dmg / 20); }
     if (e.type === 'enemy-missile') SFX.enemyLaunch();
@@ -503,6 +515,11 @@ async function start(useCamera, duelOpts) {
   resize();
   showScreen(null);
   document.body.classList.toggle('debug', debug);
+  if (!duelOpts) {
+    game = newGame(modePick.value);
+    if (game.solo) flash(game.team === 'attacker' ? 'YOU ARE THE 109 — bring down ' + CONFIG.ESCORT_KILLS + ' bombers; the formation is below, ahead'
+      : 'ESCORT — keep the 109s off the bombers', game.team === 'attacker' ? HUD.red : HUD.cyan);
+  }
   if (duelOpts) duelConnect(duelOpts.name, duelOpts.host, duelOpts.mode);
   else if (useCamera && !isCalibrated(settings)) startCalibration();
   requestAnimationFrame(frame);
@@ -516,14 +533,16 @@ function toggle(key, a, b, text) {
   flash(text(settings[key]), HUD.ink);
 }
 
-// Start screen: plane and minimal HUD.
+// Start screen: mode, plane and minimal HUD.
+const modePick = document.getElementById('mode-pick');
+if (new URLSearchParams(location.search).has('dogfight')) modePick.value = 'dogfight';
 const planePick = document.getElementById('plane-pick'), minHudBox = document.getElementById('min-hud');
 planePick.value = PLANES[settings.plane] ? settings.plane : DEFAULT_PLANE;
 minHudBox.checked = !!settings.minHud;
 planePick.addEventListener('change', () => {
   settings.plane = planePick.value;
   saveSettings();
-  if (!duel) game = createGame(Date.now() % 100000, game.mode, settings.plane);
+  if (!duel && !game.solo) game = createGame(Date.now() % 100000, game.mode, settings.plane);
 });
 minHudBox.addEventListener('change', () => { settings.minHud = minHudBox.checked; saveSettings(); });
 
@@ -568,12 +587,13 @@ window.addEventListener('keydown', e => {
     if (duel.phase === 'calib') { calib = null; duelReady(); }
     if (duel.phase === 'over') duelSend({ t: 'rematch' });
   }
-  if (e.code === 'KeyR' && !duel) { game = createGame(Date.now() % 100000, game.mode, settings.plane); flash('RESET', HUD.ink); }
-  if (e.code === 'KeyN' && !duel) {
+  if (e.code === 'KeyR' && !duel) { game = newGame(gameKind(game)); flash(game.solo ? 'NEW MISSION' : 'RESET', HUD.ink); }
+  if (e.code === 'KeyN' && !duel && !game.solo) {
     if (game.bombers.filter(b => b.alive).length < CONFIG.BOMBER_MAX) spawnBomber(game);
     else flash('BOMBERS: ' + CONFIG.BOMBER_MAX + ' AT ONCE', HUD.dim);
   }
-  if (e.code === 'KeyK' && !duel) {
+  if (e.code === 'KeyK' && game.solo) flash('THE MISSION PICKS YOUR PLANE', HUD.dim);
+  if (e.code === 'KeyK' && !duel && !game.solo) {
     const i = PLANE_ORDER.indexOf(settings.plane);
     settings.plane = PLANE_ORDER[(i + 1) % PLANE_ORDER.length];
     saveSettings();
@@ -586,7 +606,7 @@ window.addEventListener('keydown', e => {
     flash(settings.minHud ? 'MINIMAL HUD — no markers, find them yourself' : 'FULL HUD', HUD.ink);
   }
   if (e.code === 'KeyB' && !duel) {
-    game = createGame(Date.now() % 100000, game.mode === 'range' ? 'dogfight' : 'range', settings.plane);
+    game = newGame(game.mode === 'range' ? 'dogfight' : 'range');
     flash(game.mode === 'dogfight' ? 'DOGFIGHT — bandits incoming' : 'TEST RANGE', HUD.ink);
   }
   if (e.code === 'Digit1' && settings.scheme !== 'flat') toggle('scheme', 'flat', 'stick', () => 'FLAT HAND');

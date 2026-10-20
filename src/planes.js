@@ -31,6 +31,10 @@ const WW2 = {
   OVER_G_HEAL: 0.15,         // stress drains this much per second back under the limit
   OVER_G_WARN: 0.9,          // creak + amber G from this share of the limit
   HIT_R: 7,                  // gun hit radius (m) on these planes: a ~11 m wingspan, a little generous
+  // Hidden gun assist (no lead marker on screen): rounds bend onto the solved lead when the nose
+  // is within ASSIST_SCALE × the gun-assist slider of it, inside GUN_ASSIST_RANGE. Hands on a
+  // camera can't hold the last degree steady; you still have to get the nose there.
+  ASSIST_SCALE: 1.5, GUN_ASSIST_RANGE: 600,
   SIGHT_RANGE: 125, SIGHT_SPAN: 11,   // a fighter fills the sight ring at 125 m, half of it at ~250 m (convergence)
   CHASE_BACK: 20, CHASE_UP: 4.5,      // chase camera (the lag adds ~speed / 7 m)
   VAPOR_MIN_RATE: 0.22, VAPOR_FULL_RATE: 0.3,

@@ -4,7 +4,8 @@
 // them become 'duel-hit' events for main.js to send, theirs arrive as messages. No respawn there:
 // the duel server starts each round. 'escort': several humans (g.remotes) around a bomber formation
 // the server flies (escort.js applies its states; g.bombersRemote): your hits on a bomber become
-// 'bomber-hit' events for the server to judge. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
+// 'bomber-hit' events for the server to judge. Solo escort (raid.js, g.solo): the same mission on one
+// laptop, with AI pilots for the other side and this game flying the bombers. Pure: no DOM. gameUpdate pushes { type, pos } onto g.events.
 //
 // Bullets and missiles carry an owner ('player' or a bandit id) and hit only the other side.
 // Things a missile can chase are { pos, vel, alive }: drones, bandits, bombers, and g.player (you).
@@ -117,12 +118,12 @@ function spawnBomber(g) {
 // (FORMATION, in the lead's frame: right, back, up), all flying heading.
 function spawnFormation(g, center, heading) {
   const right = vNorm(vCross(heading, WORLD_UP));
-  return CONFIG.FORMATION.map(([x, back, y]) => makeBomber(g, vAdd(center, vAdd(vScale(right, x), vAdd(vScale(heading, -back), v3(0, y, 0)))), heading));
+  return CONFIG.FORMATION.map(([x, back, y]) => makeBomber(g, vAdd(center, vAdd(vScale(right, x), vAdd(vScale(heading, -back), v3(0, y, 0)))), heading, CONFIG.FORMATION_SPEED));
 }
 
-function makeBomber(g, pos, dir) {
+function makeBomber(g, pos, dir, speed) {
   const plane = createPlane(pos, dir);
-  plane.speed = CONFIG.BOMBER_SPEED;
+  plane.speed = speed || CONFIG.BOMBER_SPEED;
   const b = {
     id: g.nextId++, kind: 'bomber', plane, pos: plane.pos, vel: vScale(plane.fwd, plane.speed),
     hp: CONFIG.BOMBER_HP, maxHp: CONFIG.BOMBER_HP,
@@ -169,8 +170,11 @@ function hitBomber(g, b, dmg, part, pos, how) {
 
 function killBomber(g, b, how) {
   b.alive = false;
-  g.kills++;
-  g.score += CONFIG.BOMBER_REWARD;
+  // Yours, unless an AI 109 got it or you're the solo escort (then it's a loss, not a kill).
+  if (how !== 'ai' && !(g.solo && g.team === 'escort')) {
+    g.kills++;
+    g.score += CONFIG.BOMBER_REWARD;
+  }
   g.events.push({ type: 'kill', pos: b.pos, bomber: true, how });
 }
 
@@ -307,10 +311,12 @@ function hitBandit(g, b, dmg, how) {
 
 function killBandit(g, b, how) {
   b.alive = false;
-  g.kills++;
-  g.score += how === 'crashed' ? Math.round(SKILLS[b.skill].reward / 2) : SKILLS[b.skill].reward;
+  if (how !== 'gunner') {   // the bombers' gunners (solo escort) don't score for you
+    g.kills++;
+    g.score += how === 'crashed' ? Math.round(SKILLS[b.skill].reward / 2) : SKILLS[b.skill].reward;
+  }
   g.waveT = CONFIG.WAVE_GAP;
-  g.events.push({ type: 'kill', pos: b.pos, bandit: true, how, skill: b.skill });
+  g.events.push({ type: 'kill', pos: b.pos, bandit: true, how, skill: b.skill, team: b.team });
 }
 
 function hurtPlayer(g, dmg, pos) {
@@ -330,15 +336,16 @@ function hurtPlayer(g, dmg, pos) {
 // → { target, dir, dist, off (angle between nose and dir), inRange } or null.
 function gunSolution(g) {
   const p = g.plane;
-  if (p.crashed || p.spec.LEAD === false) return null;   // WW2: read the lead off your tracers
-  const pv = planeVelocity(p);
+  if (p.crashed) return null;   // (WW2: worked out for the hidden assist, but not drawn)
+  const pv = planeVelocity(p), gunSpeed = p.spec.GUNS ? p.spec.GUNS[0].speed : CONFIG.GUN_SPEED;
   let best = null;
   for (const t of lockables(g)) {
+    if (typeof escortFriend === 'function' && escortFriend(g, t)) continue;   // never pull rounds onto a friend
     const to = vSub(t.pos, p.pos), dist = vLen(to);
     if (dist > CONFIG.GUN_LEAD_RANGE || dist < 1) continue;
     const rel = vSub(t.vel || v3(0, 0, 0), pv);
     let aim = to;
-    for (let i = 0; i < 4; i++) aim = vAdd(to, vScale(rel, vLen(aim) / CONFIG.GUN_SPEED));
+    for (let i = 0; i < 4; i++) aim = vAdd(to, vScale(rel, vLen(aim) / gunSpeed));
     const dir = vNorm(aim);
     const off = Math.acos(clamp(vDot(dir, p.fwd), -1, 1));
     if (off > CONFIG.GUN_LEAD_CONE) continue;
@@ -349,10 +356,11 @@ function gunSolution(g) {
 
 // A WW2 plane's guns (spec.GUNS): each gun fires from its own spot on the wing or cowl, aimed to
 // cross the nose line at CONVERGENCE. triggers = { mg, cannon } (cannon fires everything).
-// ammo: false = unlimited (AI). Rounds carry power and drop under gravity. Returns the groups fired.
-function fireGuns(g, p, triggers, dt, owner, ammo) {
+// ammo: false = unlimited (AI). aim: the assist's direction (the guns converge on it instead of the
+// nose line), or null. Rounds carry power and drop under gravity. Returns the groups fired.
+function fireGuns(g, p, triggers, dt, owner, ammo, aim) {
   const S = p.spec, fired = { mg: false, cannon: false };
-  const conv = vScale(p.fwd, S.CONVERGENCE);
+  const conv = vScale(aim || p.fwd, S.CONVERGENCE);
   S.GUNS.forEach((gn, i) => {
     const on = gn.group === 'cannon' ? triggers.cannon : (triggers.mg || triggers.cannon);
     if (!on || (ammo && p.ammo[i] <= 0)) { p.gunAcc[i] = Math.min(p.gunAcc[i], 1); return; }
@@ -412,10 +420,10 @@ function gameUpdate(g, ctrl, dt) {
     // Gun. Magnetism: with the sight within the assist angle of the lead marker (and close enough),
     // the rounds go to the marker.
     g.gunSol = gunSolution(g);
-    const assist = (ctrl.gunAssist ?? CONFIG.DEFAULTS.gunAssist) * DEG, sol = g.gunSol;
-    g.gunAssisted = !!sol && sol.off <= assist && sol.dist <= CONFIG.GUN_ASSIST_RANGE;
+    const assist = (ctrl.gunAssist ?? CONFIG.DEFAULTS.gunAssist) * DEG * (p.spec.ASSIST_SCALE || 1), sol = g.gunSol;
+    g.gunAssisted = !!sol && sol.off <= assist && sol.dist <= p.spec.GUN_ASSIST_RANGE;
     if (p.spec.GUNS) {
-      const fired = fireGuns(g, p, { mg: ctrl.gun, cannon: ctrl.cannon }, dt, 'player', true);
+      const fired = fireGuns(g, p, { mg: ctrl.gun, cannon: ctrl.cannon }, dt, 'player', true, g.gunAssisted ? sol.dir : null);
       if (fired.mg) g.events.push({ type: 'gun', pos: p.pos });
       if (fired.cannon) g.events.push({ type: 'cannon', pos: p.pos });
     } else {
@@ -441,6 +449,7 @@ function gameUpdate(g, ctrl, dt) {
   if (p.crashed) { g.gunSol = null; g.gunAssisted = false; }
 
   if (g.mode === 'dogfight') updateBandits(g, dt);
+  if (g.solo) raidAi(g, dt);
   if (!g.bombersRemote) updateBombers(g, dt);   // escort: the server flies them (escort.js)
   updateBullets(g, dt);
   updateMissiles(g, dt);
@@ -451,6 +460,7 @@ function gameUpdate(g, ctrl, dt) {
     while (g.drones.length < CONFIG.DRONE_COUNT) spawnDrone(g);
   }
   if (g.lock.target && !g.lock.target.alive) g.lock = { target: null, time: 0, locked: false };
+  if (g.solo) raidRules(g, dt);
   return g;
 }
 
@@ -485,29 +495,8 @@ function updateBandits(g, dt) {
       if (m.owner !== 'player' || m.target !== b) continue;
       threats.push({ ref: m, pos: m.pos, tti: missileTti(m, b.pos, b.vel), dist: vDist(m.pos, b.pos) });
     }
-    const w = pilotStep(b, P.alive ? P : null, threats, dt);
-    flightStep(b.plane, w, dt, false);
-    b.pos = b.plane.pos;
-    b.vel = planeVelocity(b.plane);
-    if (b.plane.crashed) { killBandit(g, b, 'crashed'); continue; }
-
-    // Guns: bursts while it has a solution, a little spread. WW2 bandits fire their real guns
-    // (unlimited ammo), cannons only when the shot is good.
-    b.firing = w.fire && P.alive;
-    if (b.plane.spec.GUNS) {
-      const fired = fireGuns(g, b.plane, { mg: b.firing, cannon: b.firing && w.good }, dt, b.id, false);
-      if (fired.mg || fired.cannon) g.events.push({ type: 'enemy-gun', pos: b.pos });
-    }
-    const jetGun = b.firing && !b.plane.spec.GUNS;
-    b.gunAcc = jetGun ? b.gunAcc + dt * CONFIG.BANDIT_GUN_RATE : Math.min(b.gunAcc, 1);
-    while (jetGun && b.gunAcc >= 1) {
-      b.gunAcc -= 1;
-      const s = CONFIG.BANDIT_GUN_SPREAD;
-      let dir = vRotate(b.plane.fwd, b.plane.up, (b.rng() - 0.5) * 2 * s);
-      dir = vRotate(dir, b.plane.right, (b.rng() - 0.5) * 2 * s);
-      fireBullet(g, b.plane, dir, b.id);
-      g.events.push({ type: 'enemy-gun', pos: b.pos });
-    }
+    const w = flyBandit(g, b, P.alive ? P : null, threats, dt);
+    if (!w) continue;
 
     // Missiles: hold you in the cone for ENEMY_LOCK_TIME (you get LOCK WARNING), then launch.
     b.missileCd = Math.max(0, b.missileCd - dt);
@@ -529,6 +518,35 @@ function updateBandits(g, dt) {
       g.waveT = CONFIG.WAVE_GAP;
     }
   }
+}
+
+// One bandit's turn: its pilot flies it at target ({ pos, vel, plane? }, null = patrol) and it fires
+// its guns when it has a shot (holdFire: never). Returns the pilot's wishes, or null if it crashed.
+function flyBandit(g, b, target, threats, dt, holdFire) {
+  const w = pilotStep(b, target, threats, dt);
+  flightStep(b.plane, w, dt, false);
+  b.pos = b.plane.pos;
+  b.vel = planeVelocity(b.plane);
+  if (b.plane.crashed) { killBandit(g, b, 'crashed'); return null; }
+
+  // Guns: bursts while it has a solution, a little spread. WW2 bandits fire their real guns
+  // (unlimited ammo), cannons only when the shot is good.
+  b.firing = w.fire && !!target && !holdFire;
+  if (b.plane.spec.GUNS) {
+    const fired = fireGuns(g, b.plane, { mg: b.firing, cannon: b.firing && w.good }, dt, b.id, false);
+    if (fired.mg || fired.cannon) g.events.push({ type: 'enemy-gun', pos: b.pos });
+  }
+  const jetGun = b.firing && !b.plane.spec.GUNS;
+  b.gunAcc = jetGun ? b.gunAcc + dt * CONFIG.BANDIT_GUN_RATE : Math.min(b.gunAcc, 1);
+  while (jetGun && b.gunAcc >= 1) {
+    b.gunAcc -= 1;
+    const s = CONFIG.BANDIT_GUN_SPREAD;
+    let dir = vRotate(b.plane.fwd, b.plane.up, (b.rng() - 0.5) * 2 * s);
+    dir = vRotate(dir, b.plane.right, (b.rng() - 0.5) * 2 * s);
+    fireBullet(g, b.plane, dir, b.id);
+    g.events.push({ type: 'enemy-gun', pos: b.pos });
+  }
+  return w;
 }
 
 function updateBullets(g, dt) {
@@ -563,9 +581,12 @@ function updateBullets(g, dt) {
       }
     } else if (b.owner === 'remote') {
       // The other laptop's rounds: drawn here, but only their laptop decides what they hit.
-    } else if (g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < (g.plane.spec.HIT_R ?? CONFIG.PLANE_HIT_R)) {
-      hurtPlayer(g, CONFIG.BANDIT_GUN_DMG * power, b.pos);
-      b.age = 99;
+    } else {
+      if (g.solo) raidBulletHits(g, b, prev, power);   // gunners vs AI 109s, AI 109s vs bombers
+      if (b.age < 99 && g.player.alive && segPointDist(prev, b.pos, g.plane.pos) < (g.plane.spec.HIT_R ?? CONFIG.PLANE_HIT_R)) {
+        hurtPlayer(g, CONFIG.BANDIT_GUN_DMG * power, b.pos);
+        b.age = 99;
+      }
     }
     if (b.pos.y < groundHeight(b.pos.x, b.pos.z)) b.age = 99;
   }

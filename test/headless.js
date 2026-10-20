@@ -6,8 +6,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ctx = vm.createContext({ console, Math });
-const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
-vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
+const src = ['config.js', 'math.js', 'planes.js', 'flight.js', 'ai.js', 'hands.js', 'head.js', 'recorder.js', 'game.js', 'duel.js', 'escort.js', 'raid.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8')).join('\n');
+vm.runInContext(src + '\n;this.__x = { CONFIG, DEG, DEFAULT_NEUTRAL, v3, vDot, vLen, vCross, vSub, measureHand, assignHands, createControls, controlsUpdate, calibrateNeutral, createRangeSweep, rangeSweepAdd, rangeSweepFinish, escortReceive, escortStep, escortFriend, createRaid, raidForm, raidRules, hitBomber, makeRng, PLANES, planeSpec, PLANE_ENEMY, fireGuns, createPlane, flightStep, bankAngle, pitchEnvelope, planeVelocity, SKILLS, createBandit, pilotStep, spawnBandit, missileTti, gunSolution, spawnBomber, bomberPartPos, segPointDist, vNorm, vRotate, createDuel, duelReceive, duelSnapshot, duelRemoteStep, duelFlying, vDist, vAdd, vScale, groundHeight, createGame, gameUpdate, vaporAmount, headFollow, createClap, clapUpdate, assistOn, isCalibrated, neutralRoom, neutralFromRecording, RECORD_STEPS, createRecorder, recorderStep, recorderAdd, recorderResult, measureFace, createHead, headUpdate, calibrateHead };', ctx);
 const X = ctx.__x;
 const { CONFIG, DEG } = X;
 
@@ -1057,7 +1057,7 @@ console.log('WW2 guns');
   const fired = g.bullets.length;
   check('the cannon drums run dry (~7 s of fire)', ammoOf(p, 'cannon') === 0 && ammoOf(p, 'mg') > 0);
   for (let i = 0; i < 30; i++) X.gameUpdate(g, ctl({ missile: true }), 1 / 60);
-  check('no missiles in a WW2 plane, and no lead marker', g.missiles.length === 0 && X.gunSolution(g) === null);
+  check('no missiles in a WW2 plane, and no lead marker (spec LEAD false: the HUD hides it)', g.missiles.length === 0 && p.spec.LEAD === false);
   p.crashed = true;
   for (let i = 0; i < 60 * 3 && g.plane.crashed; i++) X.gameUpdate(g, ctl(), 1 / 60);
   check('respawn rearms', ammoOf(g.plane, 'cannon') === cn0 && ammoOf(g.plane, 'mg') === mg0);
@@ -1128,6 +1128,113 @@ console.log('gun lead + assist');
   const put = dist => { g.drones = [{ id: 1, kind: 'drone', pos: X.vAdd(p.pos, X.vScale(p.fwd, dist)), vel: X.v3(0, 0, 0), alive: true }]; return X.gunSolution(g); };
   check('the marker is green (in range) inside 800 m, dim beyond', put(600).inRange && !put(1000).inRange);
   check('no marker for a target behind you', (() => { g.drones = [{ id: 1, kind: 'drone', pos: X.vAdd(p.pos, X.vScale(p.fwd, -600)), vel: X.v3(0, 0, 0), alive: true }]; return X.gunSolution(g) === null; })());
+}
+
+console.log('WW2 hidden gun assist');
+{
+  // A P-51 crossing at 100 m/s, 400 m ahead of a 109; a perfect pilot holds the nose 4° off the lead.
+  const crossing = (assist, offDeg) => {
+    const g = X.createGame(13, 'duel', 'bf109');
+    const p = g.plane;
+    const b = X.createBandit(500, 'regular', X.vAdd(p.pos, X.vScale(p.fwd, 400)), X.v3(-1, 0, 0), X.makeRng(1), 'p51');
+    b.hp = 1e9;
+    g.bandits = [b];
+    for (let i = 0; i < 90; i++) {
+      b.vel = X.v3(-100, 0, 0);
+      b.pos = b.plane.pos = X.vAdd(b.pos, X.vScale(b.vel, 1 / 60));
+      const sol = X.gunSolution(g);
+      if (sol) {
+        const f = X.vRotate(sol.dir, X.v3(0, 1, 0), offDeg * DEG);
+        p.fwd = f; p.right = X.vNorm(X.vCross(f, X.v3(0, 1, 0))); p.up = X.vCross(p.right, f); p.path = { ...f };
+      }
+      X.gameUpdate(g, { roll: 0, pitch: 0, yaw: 0, throttle: 0.5, gun: i < 40, cannon: false, missile: false, assist: false, gunAssist: assist }, 1 / 60);
+      g.bandits = [b];
+    }
+    return 1e9 - b.hp;
+  };
+  const on = crossing(3.5, 4), off = crossing(0, 4), exact = crossing(0, 0);
+  check('WW2: no lead marker, but 4° off the lead the hidden assist (3.5° × 1.5) puts rounds on', on > 1, on.toFixed(1) + ' dmg');
+  check('…the same aim with the assist off misses', off === 0, off.toFixed(1) + ' dmg');
+  check('…and dead on the lead hits without help', exact > 1, exact.toFixed(1) + ' dmg');
+  // Escort: the assist never bends your rounds onto a friend (a fellow escort, a bomber).
+  const g = X.createGame(14, 'escort', 'p51');
+  g.team = 'escort';
+  const p = g.plane;
+  g.remotes = [{ kind: 'remote', team: 'escort', peer: 3, name: 'Cat', pos: X.vAdd(p.pos, X.vScale(p.fwd, 300)), vel: X.v3(0, 0, 0), alive: true, plane: X.createPlane(p.pos, null, 'p51') }];
+  check('the assist ignores friends', X.gunSolution(g) === null);
+  g.remotes[0].team = 'attacker';
+  check('…and takes the 109', X.gunSolution(g) && X.gunSolution(g).target === g.remotes[0]);
+}
+
+console.log('solo escort');
+{
+  const DT = 1 / 60;
+  const idle = { roll: 0, pitch: 0, yaw: 0, throttle: 0.8, gun: false, cannon: false, missile: false };
+  // Fly the 109: AI P-51s sit with the formation until you come near.
+  const a = X.createRaid(21, 'attacker');
+  const f0 = X.raidForm(a);
+  check('fly the 109: a 109, 6 bombers, ' + CONFIG.RAID_ESCORTS + ' AI P-51 escorts', a.plane.type === 'bf109' && a.team === 'attacker' && a.bombers.length === 6
+    && a.bandits.length === CONFIG.RAID_ESCORTS && a.bandits.every(b => b.team === 'escort' && b.plane.type === 'p51'));
+  const up = a.plane.pos.y - f0.c.y, out = Math.hypot(a.plane.pos.x - f0.c.x, a.plane.pos.z - f0.c.z);
+  check('…you start high and well out', up > 1500 && out > 5000, Math.round(up) + ' m up, ' + Math.round(out) + ' m out');
+  // Park yourself far off: the escorts stay with the bombers and hold fire.
+  let fired = false;
+  for (let t = 0; t < 15; t += DT) { a.plane.pos = X.vAdd(X.raidForm(a).c, X.v3(9000, 3000, 0)); X.gameUpdate(a, idle, DT); fired = fired || a.bandits.some(b => b.firing); }
+  const f1 = X.raidForm(a);
+  const far = Math.max(...a.bandits.map(b => X.vDist(b.pos, f1.c)));
+  check('…the escorts hold their places by the formation while you are far off', far < 1500 && !fired && a.bandits.every(b => !b.engaged), Math.round(far) + ' m');
+  a.plane.pos = X.vAdd(f1.c, X.vScale(f1.heading, 2500));
+  X.gameUpdate(a, idle, DT);
+  check('…and come for you once you are near the bombers', a.bandits.every(b => b.engaged));
+  check('the gunners shoot at you (the 109)', a.gunTargets.length === 1 && a.gunTargets[0] === a.player);
+  // Shot down, you lose a life and come back high above.
+  const before = a.solo.lives;
+  a.plane.crashed = true; a.plane.shotDown = true;
+  X.gameUpdate(a, idle, DT);
+  check('shot down: one life gone', a.solo.lives === before - 1);
+  for (let t = 0; t < CONFIG.ESCORT_RESPAWN + 0.2; t += DT) X.gameUpdate(a, idle, DT);
+  check('…back in after ' + CONFIG.ESCORT_RESPAWN + ' s, high above', !a.plane.crashed && a.plane.pos.y - X.raidForm(a).c.y > 1500);
+  // Bombers down: each kill counts; ESCORT_KILLS = the 109 wins.
+  for (let k = 0; k < CONFIG.ESCORT_KILLS; k++) { const b = a.bombers.find(x => x.alive); a.events.length = 0; X.hitBomber(a, b, 999, null, b.pos, 'gun'); X.raidRules(a, DT); }
+  check('down ' + CONFIG.ESCORT_KILLS + ' bombers: the 109 wins, and they were your kills', a.solo.over && a.solo.over.winner === 'attacker' && a.kills >= CONFIG.ESCORT_KILLS);
+
+  // Fly escort: AI 109s dive in from high up.
+  const e = X.createRaid(22, 'escort');
+  check('fly escort: a P-51 by the bombers, ' + CONFIG.RAID_109_AT_ONCE + ' AI 109s inbound from above', e.plane.type === 'p51' && e.team === 'escort'
+    && e.bandits.length === CONFIG.RAID_109_AT_ONCE && e.bandits.every(b => b.team === 'attacker' && b.pos.y > e.plane.pos.y + 1000));
+  X.gameUpdate(e, idle, DT);
+  check('…the gunners shoot at the 109s, not you', e.gunTargets.length === CONFIG.RAID_109_AT_ONCE && !e.gunTargets.includes(e.player));
+  // A gunner's round through a 109 hurts it; a 109's round through a bomber hurts the bomber.
+  const b109 = e.bandits[0], hp0 = b109.hp;
+  e.bullets.push({ pos: X.vAdd(b109.pos, X.v3(0, 30, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'bomber', power: 1 });
+  X.gameUpdate(e, idle, DT);
+  check('a gunner round hits a 109', b109.hp < hp0);
+  const bo = e.bombers[0], bhp = bo.hp;
+  e.bullets.push({ pos: X.vAdd(bo.pos, X.v3(0, 30, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: b109.id, team: 'attacker', power: 1 });
+  X.gameUpdate(e, idle, DT);
+  check('a 109 round hits a bomber', bo.hp < bhp);
+  const score0 = e.score;
+  e.events.length = 0;
+  X.hitBomber(e, bo, 999, null, bo.pos, 'ai');
+  X.raidRules(e, DT);
+  check('a bomber lost is a loss, not your score', e.solo.kills === 1 && e.score === score0 && e.kills === 0);
+  // The 109s' pool: shoot the last one down and the escorts win.
+  e.solo.lives = 1;
+  for (const b of e.bandits) b.hp = 0.001;
+  e.bullets.push(...e.bandits.map(b => ({ pos: X.vAdd(b.pos, X.v3(0, 30, 0)), vel: X.v3(0, -900 * 60, 0), age: 0, owner: 'player', power: 1 })));
+  X.gameUpdate(e, idle, DT);
+  check('the last 109 down: the escorts win', e.solo.over && e.solo.over.winner === 'escort' && e.solo.over.why === 'shot');
+  // Left alone, the AI 109s get through: a bomber goes down well inside the mission time.
+  const z = X.createRaid(2, 'escort');
+  z.plane.crashed = true; z.respawnT = -1e9;
+  let t = 0;
+  while (t < CONFIG.ESCORT_TIME && !z.solo.kills) { X.gameUpdate(z, idle, DT); t += DT; }
+  check('an undefended formation loses a bomber to the AI 109s', z.solo.kills > 0, Math.round(t) + ' s');
+  // Time up with bombers flying: the escorts win.
+  const q = X.createRaid(23, 'attacker');
+  q.solo.left = 0.01;
+  X.gameUpdate(q, idle, DT);
+  check('time up: the bombers reach the target, escorts win', q.solo.over && q.solo.over.winner === 'escort' && q.solo.over.why === 'time');
 }
 
 console.log('game');
